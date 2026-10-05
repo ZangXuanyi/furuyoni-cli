@@ -134,9 +134,9 @@ TEST_CASE("crystals are conserved over full random games") {
   }
 }
 
-static int find_def(Engine& e, const std::string& set, const std::string& name) {
+static int find_def(Engine& e, const std::string& setOrGoddess, const std::string& name) {
   for (const auto& d : e.defs)
-    if (d.set == set && d.name == name) return d.id;
+    if ((d.set == setOrGoddess || d.goddess == setOrGoddess) && d.name == name) return d.id;
   return -1;
 }
 
@@ -373,6 +373,138 @@ TEST_CASE("迷烟 negates card-effect distance changes but not basic actions") {
   CHECK(e.move_crystals(AreaRef::distance(), AreaRef::dust(), 1, true) == 0);
   CHECK(e.move_crystals(AreaRef::distance(), AreaRef::dust(), 1, false) == 1);
   CHECK(e.st.distance == 9);
+}
+
+TEST_CASE("variant forms, deck assembly, and card replacement") {
+  Engine e;
+  load_standard(e);
+  CHECK(e.available_forms("yurina").size() == 3);
+  CHECK(e.available_forms("saine").size() == 3);
+  CHECK(e.available_forms("tokoyo").size() == 3);
+  CHECK(e.available_forms("himika").size() == 2);  // A1 only
+  int variants = 0;
+  for (auto& d : e.defs)
+    if (d.form != "O") variants++;
+  CHECK(variants == 21);  // yurina 6 + saine 6 + himika 3 + tokoyo 6
+
+  auto has = [&](const std::vector<int>& ids, const std::string& name) {
+    for (int id : ids)
+      if (e.def(id).name == name) return true;
+    return false;
+  };
+  auto a1 = e.deck_def_ids("saine", "A1");
+  CHECK(has(a1, "合奏"));          // A1-N1 replaces O-N1 八面斩
+  CHECK_FALSE(has(a1, "八面斩"));
+  CHECK(has(a1, "伴奏"));          // A1-N6 replaces O-N6 冲音晶
+  CHECK_FALSE(has(a1, "冲音晶"));
+  CHECK(has(a1, "薙刀斩"));        // unchanged O card kept
+  auto o = e.deck_def_ids("saine", "O");
+  CHECK(has(o, "八面斩"));
+  CHECK_FALSE(has(o, "合奏"));
+  // dual-goddess card (def-level check)
+  for (int id : a1)
+    if (e.def(id).name == "合奏") {
+      bool dual = false;
+      for (auto& g : e.def(id).goddesses)
+        if (g == "tokoyo") dual = true;
+      CHECK(dual);
+    }
+}
+
+TEST_CASE("徒寄之八重樱 raises the aura cap to 8 while used") {
+  Engine e;
+  load_standard(e);
+  FirstAgent a;
+  e.set_agent(P0, &a);
+  e.set_agent(P1, &a);
+  int def = find_def(e, "tokoyo", "徒寄之八重樱");
+  REQUIRE(def >= 0);
+  int inst = e.add_instance(def, P0);
+  e.move_card(inst, Zone::Special);
+  e.ci(inst).faceUp = true;
+  CHECK(e.max_aura(P0) == 8);
+  e.ci(inst).faceUp = false;
+  CHECK(e.max_aura(P0) == 5);
+}
+
+TEST_CASE("神座渡 locks X before paying its cost") {
+  Engine e;
+  load_standard(e);
+  FirstAgent a;
+  e.set_agent(P0, &a);
+  e.set_agent(P1, &a);
+  int def = find_def(e, "yurina", "神座渡");
+  REQUIRE(def >= 0);
+  int inst = e.add_instance(def, P0);
+  e.move_card(inst, Zone::Special);
+  e.ps(P0).flare = 4;
+  CHECK(e.cut_cost(P0, def, inst) == 4);
+  CHECK(e.load_int(inst, "X") == 4);
+}
+
+TEST_CASE("悠久之雪: choosing a 0-aura side still counts as taking aura damage") {
+  Engine e;
+  load_standard(e);
+  FirstAgent a;
+  e.set_agent(P0, &a);
+  e.set_agent(P1, &a);
+  e.st.p[P0].aura = 2;
+  e.st.p[P0].life = 10;
+  e.st.p[P0].flare = 0;
+  e.st.dust = 0;
+  e.deal_damage(P0, 0, 1, 0);  // FirstAgent picks option 0 (aura)
+  CHECK(e.last_damage_side() == 1);  // aura side chosen even though amount is 0
+  CHECK(e.last_damage_amount() == 0);
+  CHECK(e.st.p[P0].aura == 2);
+  CHECK(e.st.p[P0].life == 10);
+}
+
+TEST_CASE("绝唱绝华 ends the opponent's main phase when aura empties") {
+  Engine e;
+  load_standard(e);
+  FirstAgent a;
+  e.set_agent(P0, &a);
+  e.set_agent(P1, &a);
+  int def = find_def(e, "saine", "绝唱绝华");
+  REQUIRE(def >= 0);
+  int inst = e.add_instance(def, P1);
+  e.move_card(inst, Zone::Special);
+  e.ci(inst).faceUp = false;
+  e.ps(P1).flare = 5;
+  e.ps(P1).aura = 2;
+  e.st.active = P0;
+  e.st.distance = 5;
+  Attack incoming;
+  incoming.attacker = P0;
+  incoming.sourceInst = -1;
+  incoming.range.add(0, 10);
+  incoming.aura = 2;  // aura-only: P1 must take aura and end at 0
+  e.currentResponding = &incoming;
+  e.play_card(P1, inst, true);  // responds; registers on_resolve on `incoming`
+  e.resolve_attack(incoming);
+  CHECK(e.main_aborted());
+}
+
+TEST_CASE("resetting 徒寄之八重樱 moves aura above 5 to dust") {
+  Engine e;
+  load_standard(e);
+  FirstAgent a;
+  e.set_agent(P0, &a);
+  e.set_agent(P1, &a);
+  int def = find_def(e, "tokoyo", "徒寄之八重樱");
+  REQUIRE(def >= 0);
+  int inst = e.add_instance(def, P0);
+  e.move_card(inst, Zone::Special);
+  e.ci(inst).faceUp = true;
+  e.st.dust = 20;
+  int moved = e.move_crystals(AreaRef::dust(), AreaRef::aura(P0), 8, false);
+  CHECK(moved == 5);  // 3 -> 8 (cap 8)
+  CHECK(e.st.p[P0].aura == 8);
+  int dust = e.st.dust;
+  e.reset_special(inst);
+  CHECK(e.max_aura(P0) == 5);
+  CHECK(e.st.p[P0].aura == 5);
+  CHECK(e.st.dust == dust + 3);
 }
 
 TEST_CASE("standard mode replay reproduces the state hash") {

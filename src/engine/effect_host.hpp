@@ -19,7 +19,12 @@ struct EvaluatedAttack {
   Range range;
   Damage damage;
   uint32_t keywords = 0;
+  int evade = 0;                 // 问答: defender may cover N to take no damage
+  bool attackerChooses = false;  // 畏掠: attacker picks the damage side
 };
+
+// Opaque per-card trigger spec (defined in the .cpp).
+struct TriggerSpec;
 
 // How (and whether) a special card resets itself.
 //   kind: 0 = none, 1 = end-of-owner's-turn, 2 = immediate
@@ -69,6 +74,12 @@ class EffectHost {
 
   // Clear pending "next attack" modifiers; endOfTurnOnly keeps non-expiring ones.
   void clear_pending_mods(bool endOfTurnOnly);
+
+  // Fire a named event; runs matching `triggers` on every active card (APNAP).
+  void fire(Engine& e, const std::string& event, Player subject, Attack* atk, int card, bool first);
+
+  // Run callbacks registered via ctx:on_resolve() for an attack that just resolved.
+  void run_after_attack(Engine& e, Attack* a);
 
  private:
   struct Impl;

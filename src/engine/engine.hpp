@@ -1,9 +1,11 @@
 #pragma once
 // The rules engine. Knows nothing about concrete cards; all card behaviour is
 // delegated to EffectHost (Lua). See effect_host.hpp.
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "core/state.hpp"
@@ -37,6 +39,8 @@ struct Attack {
   std::optional<int> aura, life;
   int auraDelta = 0, lifeDelta = 0;
   uint32_t keywords = 0;
+  int evadeCover = 0;              // 问答: defender may skip damage and cover N
+  bool attackerChoosesDamage = false;  // 畏掠
   bool negated = false;       // 打消
   bool missed = false;        // range re-check failed
   bool hit = false;
@@ -108,14 +112,33 @@ class Engine {
   int effective_armor(Player p) const;   // 实装 + “视作装”的卡上结晶
   void spend_aura(Player target, int n);  // consume “视作装”结晶 first, then real aura
   int cut_cost(Player p, int defId, int inst);       // dynamic 切札 费用
+  int max_aura(Player p) const;                      // 装上限（徒寄之八重樱 -> 8）
+  int effective_hand_limit(Player p) const;          // 盖伏保留上限
   bool playable_card(Player p, int inst);            // playable-in-main predicate (e.g. 决死限定)
   bool respondable_card(Player p, int inst);         // response capability (含识破/终焉)
   bool basic_legal(Player p, BasicAction a) const;
   bool do_basic(Player p, BasicAction a);            // free basic action (no vigor/cover)
   void free_basics(Player p, int maxTimes);
+  void free_basics_of(Player p, int maxTimes, const std::vector<std::string>& allowed);
   Attack make_attack(Player p, int inst, bool asResponse, bool consumePending);
   bool any_lock_distance() const;
   void reveal_hand(Player p);
+
+  // ---- Phase 3 extensions --------------------------------------------------
+  int used_special_count(Player p, const std::string& goddess) const;  // 正面向上切札数
+  bool card_has_goddess(int inst, const std::string& g) const;
+  void reset_special(int inst);       // 神座渡: set a used 切札 back to unused
+  void clamp_aura(Player p);          // if max aura dropped, move excess (自装) to 虚
+  void die(Player p);                 // 炎天: self loss
+  void end_current_main();            // 绝唱绝华: end the opponent's main phase
+  bool main_aborted() const { return abortMain_; }
+  int last_damage_side() const { return lastDmgSide_; }      // 0 none, 1 aura, 2 life
+  int last_damage_amount() const { return lastDmgAmount_; }
+  bool last_damage_from_attack() const { return lastDmgFromAttack_; }
+  void store_int(int inst, const std::string& key, int v);   // per-card scratch (神座渡 X)
+  int load_int(int inst, const std::string& key, int def = 0) const;
+  std::vector<std::string> available_forms(const std::string& goddess) const;
+  std::vector<int> deck_def_ids(const std::string& goddess, const std::string& form) const;
 
   // The attack currently being responded to (for ctx:responding_attack()).
   Attack* currentResponding = nullptr;
@@ -124,7 +147,21 @@ class Engine {
   std::unique_ptr<EffectHost> effects_;
   Agent* agents_[2] = {nullptr, nullptr};
   bool mainDirty_ = false;
+  bool abortMain_ = false;
+  int lastDmgSide_ = 0;      // 0 none, 1 aura, 2 life
+  int lastDmgAmount_ = 0;
+  bool lastDmgFromAttack_ = false;
   std::vector<std::string> playerSets_[2];
+  std::map<std::pair<int, std::string>, int> vars_;
+  // per-turn event counters (for "first time this turn" triggers)
+  int attacksThisTurn_[2] = {0, 0};
+  int auraChangesThisTurn_[2] = {0, 0};
+  int auraChangeFired_[2] = {0, 0};
+  int attackFirstFired_[2] = {0, 0};
+
+  void fire(const char* event, Player subject, Attack* atk = nullptr, int card = -1,
+            bool first = false);
+  void notify_aura_changed(Player p);
 
   struct JournalEntry {
     Player player;
@@ -136,9 +173,13 @@ class Engine {
   std::vector<JournalEntry> journal_;
   size_t replay_pos_ = 0;
 
-  void setup_player(Player p, const std::vector<std::string>& sets);
-  std::vector<std::string> draft_pick(Player p);
-  std::string draft_ban(Player p, const std::vector<std::string>& opp);
+  // A "pick" is a (goddess, form) pair; form is "O" / "A1" / "A2".
+  void setup_player(Player p, const std::vector<std::pair<std::string, std::string>>& picks);
+  std::vector<std::pair<std::string, std::string>> draft_pick(Player p);
+  std::pair<std::string, std::string> draft_ban(
+      Player p, const std::vector<std::pair<std::string, std::string>>& opp);
+  void setup_player_sets(Player p, const std::vector<std::string>& sets);
+  void build_from_pool(Player p, std::vector<int>& normals, std::vector<int>& specials);
   void play_turn(Player p);
   void start_phase(Player p);
   void main_phase(Player p);
@@ -149,7 +190,8 @@ class Engine {
   void on_life_loss(Player p, int amount, bool triggerBreak);
   void break_enhances(Player p);
   void apply_damage_to(Player target, std::optional<int> aura, std::optional<int> life,
-                       uint32_t keywords, int sourceInst);
+                       uint32_t keywords, int sourceInst, int chooser = -1,
+                       bool fromAttack = false);
   bool ask_yes_no(Player p, const std::string& prompt);
   int ask_one(Player p, Request req);
 };

@@ -159,7 +159,12 @@ content     每套卡组一个 Lua 模块（数据 + 行为）
 
 `ctx` 新增：`rensha(p)` `shinkyou(p)` `desperation(p)` `hasso(p)` `last_life_lost(p)` `is_attack(inst)`、`hand(p)` `discard_pile(p)`、`to_deck_top(inst)` `to_deck_bottom(inst)` `discard_card(inst)`、`free_basics(p,max)` `do_basic(p,name)`、`choose_cards_for(p,…)`（让对手选择）、`next_attack_mod{ match=fn, apply=fn, this_turn=bool }`、`lose_life(p,n[,to])`。
 
-攻击句柄（`Attack`）新增：`extend_far(n)` `extend_near(n)` `shrink_far(n)`、`both_sides()`、`aura_damage()` `life_damage()`、`source_goddess()` `source_set()` `source_inst()`、`from_special()`。
+攻击句柄（`Attack`）新增：`extend_far(n)` `extend_near(n)` `shrink_far(n)`、`both_sides()`、`aura_damage()` `life_damage()`、`source_goddess()` `source_set()` `source_inst()` `source_is_goddess(g)`、`from_special()`、`no_special_response()`、`remove_unrespondable()`、`attacker_chooses_damage()`、`offer_evade(n)`。
+
+Phase 3 新增字段与 API：
+* 卡牌：`goddesses`/`goddess2`（双女神，如 `合奏`）、`aura_max`（`徒寄之八重樱`）、`triggers = {{event, cond, run}}`、`attack` 规格可含 `evade`（问答）与 `attacker_chooses_damage`（畏掠）。
+* `ctx`：`used_specials(p)` `used_special_count(p,g)` `card_is_goddess(inst,g)`、`reset_special(inst)` `die(p)` `end_current_main()` `max_aura(p)`、`add_hand_limit` `add_cut_cost_delta` `set_cannot_attack` `set_cannot_basic`、`legal_basics(p)` `free_basics_of(p,max,{...})`、`last_damage_side/amount/from_attack`、`store_int/load_int`（`神座渡` 的 X 锁定）、`on_resolve(fn)`（攻击结算后的延迟回调）。
+* 事件对象 `ev`：`type() subject() first() card() attacker() attack()`。
 
 ---
 
@@ -198,13 +203,28 @@ content     每套卡组一个 Lua 模块（数据 + 行为）
 25. `气焰万丈`：作用于另一柱女神的任意攻击（含切札与衍生）。
 26. 变格在**选女神时同时选形态**（Phase 3 实现；数据层已用 `goddess`/`form`/`num` 预留）。
 
-已知实现注意：`千岁之鸟` 的免费重铸按强制结算；`冲音晶` 以 0 献对应时，其弃置时攻击应延后到被对应攻击结算完毕（Phase 2 未实现该极少数时序，其余正常）。
+### Phase 3 追加裁定
+
+27. 伤害值 `0` 是**真实值**（如 `合奏` 3/0），对手完全可以选择承受 0；只有**未写**才是 `-`。
+28. `问答`：伤害结算前，防守方选择“不受伤害并盖伏牌库顶 3 张”（进盖牌堆）；选择后本次不受伤害。
+29. `畏掠`：若对手集中力为 0，则由攻方选择承伤侧；其“攻击后（心境）”按本牌对对手造成的**实际伤害**削弱被对应的攻击。
+30. `伴奏`：在对手本回合**第一次攻击声明时**修正（移去不可对、-1/+0），早于对应窗口。
+31. `终始`：对手装的数目在本回合**第一次变化**时触发，立即结算，可选。
+32. `徒寄之八重樱`：装上限 8 在该牌正面向上（已使用）期间生效；“回合开始时”攻击在回合开始触发。**若该牌被翻回未使用（如神座渡重置），装上限恢复，并把自装中超过上限的部分移入虚**（`reset_special` 会 `clamp_aura`）。
+33. `神座渡`：X 在**付费用之前**锁定；随后免费装附/聚气、重置 X 张已使用切牌（自身除外）、本回合手牌上限 +X。
+34. `绝唱绝华`：在被对应的攻击结算后判定“用装承伤且自装为空”，成立则结束对手主要阶段（用 `on_resolve` 延迟回调实现；已有单元测试）。
+35. `悠久之雪`：判定依据是“对手**选择**承装伤”这一侧，即使因对应把装伤降到 **0**，仍算选择承装伤并触发（0 是真实数值；已用单元测试覆盖）。
+36. `二重奏`（弹奏冰瞑/吹弹阳明）：费用-1 条件分别为八相/心境；本回合禁攻击/禁基本动作；`使用后` 持续与“因攻击受命伤”即再起按卡面。
+
+已知实现注意：`千岁之鸟` 的免费重铸按强制结算。`冲音晶` 以 0 献对应时按 S6+ 现行结算：打出→（展开时修正）→0 献即破弃并结算弃置时攻击→继续结算被对应的攻击。`回燃` 的“下一次攻击”修饰限定本回合。`悠久之雪`/`畏掠` 依赖“最近一次伤害”记录，在极少见的嵌套对应中可能被覆盖。
 
 ### 已实现的机制清单
 
 Phase 1：构筑 7+3、秘密换牌、先后手、准备/主要/盖伏/结束四阶段、五种基本动作与两种支付、全力与终端（含“对手回合打出终端后本回合不能再对应”）、攻击管线与响应窗口、伤害 X/Y 选择与 `超克`、`锁定`、`不可对`、`打消`、付与 `纳` 与展开/弃置触发、`破绽`、持续攻击修正、切札耗能与 `再起`/`即再起`、畏缩、焦躁、重铸、命/装上限、回合上限平局、观察过滤、JSON-lines 子进程协议、确定性回放与状态哈希。全力与对应互斥（不存在作为对应打出的全力）。
 
 Phase 2（基础四柱本格）：三拾一舍（秘密选 3 → 秘密禁 1 → 取 2）、双女神 14+8 构筑、五个本格卡组；被动词条 `决死`/`八相`/`连射`/`心境`；条件化攻击（`attack` 可为函数）；攻击距离修正（远/近扩、缩）；“下一次攻击”修饰队列；`两侧伤害`；`视作装` 的卡上结晶（优先消耗）；`迷烟` 的牌效改距无效；响应能力谓词（`识破`/`终焉`）；免费基本动作；动态切费；目标为对手的选择（`无穷之风`）；回库顶/库底、结束回合等工具。
+
+Phase 3（基础四柱变格）：**选女神时同时选形态**（O/A1/A2），同编号牌替代本格；`goddesses`/变格卡组装载接口。新增：事件触发器（`triggers`，`attack_declared`/`aura_changed`/`turn_start`/`responded_with`，APNAP 顺序）；延迟回调 `ctx:on_resolve`（绝唱绝华）；`切牌不可对`（里斩）；`畏掠` 的攻方选择承伤侧与“按实际伤害削弱被对应攻击”；`问答` 的防守方选择“不受伤害并盖伏牌库顶 3 张”（`evade`）；`视作装` 复数；手牌上限/切费/禁攻击/禁基本动作等本回合修正；`徒寄之八重樱` 装上限 8；`神座渡` 的 X 锁定与前付费、免费装附/聚气、重置切牌、手牌上限 +X；`合奏` 双女神牌（`goddess2`，且 3/0 的 0 为真实值，对手可选择承受 0）。
 
 ### 已知的后续工作（非 Phase 1 阻断）
 

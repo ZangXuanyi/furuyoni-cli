@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <map>
 #include <stdexcept>
+#include <utility>
 
 #include "engine/engine.hpp"
 #include "protocol/agent.hpp"
@@ -16,6 +18,7 @@ uint32_t kwflag(const std::string& s) {
   if (s == "lock" || s == "锁定") return AF_Lock;
   if (s == "overwhelm" || s == "超克") return AF_Overwhelm;
   if (s == "both_sides" || s == "两侧") return AF_BothSides;
+  if (s == "no_special_response" || s == "切牌不可对") return AF_NoSpecialResponse;
   return 0;
 }
 
@@ -72,6 +75,15 @@ struct LuaAttack {
   Engine* e = nullptr;
 };
 
+struct LuaEvent {
+  Engine* e = nullptr;
+  std::string type;
+  Player subject = P0;
+  Attack* atk = nullptr;
+  int card = -1;
+  bool first = false;
+};
+
 namespace {
 
 Range read_range(sol::object o, Engine& e, LuaCtx& c);
@@ -109,9 +121,15 @@ EvaluatedAttack read_spec(sol::object spec, Engine& e, LuaCtx& c) {
   if (dmg.is<sol::table>()) {
     sol::table dt = dmg;
     ea.damage.aura = read_int(dt["aura"], e, c);
-    ea.damage.life = read_int(dt["life"], e, c);
+    ea.damage.life = read_int(dt["life"], e, c);  // 0 is a real value; missing == "-"
   }
   ea.keywords = read_keywords(t["keywords"], e, c);
+  {
+    sol::object ev = t["evade"];
+    if (ev.is<int>()) ea.evade = ev.as<int>();
+    sol::object ac = t["attacker_chooses_damage"];
+    if (ac.is<bool>()) ea.attackerChooses = ac.as<bool>();
+  }
   return ea;
 }
 
@@ -179,6 +197,7 @@ struct EffectHost::Impl {
     sol::object on_play, on_enter, on_discard, on_attack_after, on_use_after;
     sol::table spec;
     std::vector<sol::table> continuous;
+    std::vector<sol::table> triggers;
     ResetInfo reset;
     sol::function reset_cond;
   };
@@ -191,6 +210,7 @@ struct EffectHost::Impl {
     bool expires = true;  // "本回合中" modifiers expire at end of turn
   };
   std::vector<PendingMod> pending;
+  std::map<Attack*, std::vector<std::pair<Player, sol::function>>> afterAttack;
 };
 
 EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
@@ -237,6 +257,14 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     if (h.a->sourceInst < 0 || !h.e) return std::string();
     return h.e->def_of(h.a->sourceInst).set;
   };
+  atkutil["source_is_goddess"] = [](LuaAttack& h, std::string g) -> bool {
+    if (h.a->sourceInst < 0 || !h.e) return false;
+    return h.e->card_has_goddess(h.a->sourceInst, g);
+  };
+  atkutil["no_special_response"] = [](LuaAttack& h) { h.a->keywords |= AF_NoSpecialResponse; };
+  atkutil["remove_unrespondable"] = [](LuaAttack& h) { h.a->keywords &= ~AF_Unrespondable; };
+  atkutil["attacker_chooses_damage"] = [](LuaAttack& h) { h.a->attackerChoosesDamage = true; };
+  atkutil["offer_evade"] = [](LuaAttack& h, int n) { h.a->evadeCover = n; };
 
   auto ctx = L.new_usertype<LuaCtx>("Ctx");
   ctx["player"] = [](LuaCtx& c) { return static_cast<int>(c.who); };
@@ -328,7 +356,7 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["attack"] = [this](LuaCtx& c, sol::table spec) {
     Attack a;
     a.attacker = c.who;
-    a.sourceInst = c.source;
+    a.sourceInst = c.source;  // generated attacks belong to the generating card's owner
     if (c.source >= 0) a.fromSpecial = c.e->def_of(c.source).kind == CardKind::Special;
     a.fromResponse = false;
     EvaluatedAttack ea = read_spec(spec, *c.e, c);
@@ -336,8 +364,18 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     a.aura = ea.damage.aura;
     a.life = ea.damage.life;
     a.keywords = ea.keywords;
+    a.evadeCover = ea.evade;
+    a.attackerChoosesDamage = ea.attackerChooses;
     finalize_attack(*c.e, c.who, a, true);
     c.e->resolve_attack(a);
+    sol::object after = spec["after"];
+    if (after.is<sol::function>() && a.hit) {
+      LuaCtx c2{c.e, c.who, c.source};
+      LuaAttack ha{&a, c.e};
+      auto res = after.as<sol::function>()(c2, ha);
+      if (!res.valid())
+        std::fprintf(stderr, "[lua error] attack after: %s\n", sol::error(res).what());
+    }
   };
   ctx["deal_damage"] = [](LuaCtx& c, int target, sol::object aura, sol::object life) {
     c.e->deal_damage(static_cast<Player>(target), read_int(aura, *c.e, c), read_int(life, *c.e, c), 0);
@@ -378,6 +416,73 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     if (!c.e->currentResponding) return sol::make_object(ts.L, sol::nil);
     return sol::make_object(ts.L, LuaAttack{c.e->currentResponding, c.e});
   };
+  // Phase 3 helpers
+  ctx["used_specials"] = [](LuaCtx& c, int p) {
+    std::vector<int> out;
+    for (int inst : c.e->ps(static_cast<Player>(p)).special)
+      if (c.e->ci(inst).faceUp) out.push_back(inst);
+    return out;
+  };
+  ctx["card_is_goddess"] = [](LuaCtx& c, int inst, std::string g) {
+    return c.e->card_has_goddess(inst, g);
+  };
+  ctx["reset_special"] = [](LuaCtx& c, int inst) { c.e->reset_special(inst); };
+  ctx["die"] = [](LuaCtx& c, int p) { c.e->die(static_cast<Player>(p)); };
+  ctx["end_current_main"] = [](LuaCtx& c) { c.e->end_current_main(); };
+  ctx["max_aura"] = [](LuaCtx& c, int p) { return c.e->max_aura(static_cast<Player>(p)); };
+  ctx["add_hand_limit"] = [](LuaCtx& c, int p, int n) {
+    c.e->ps(static_cast<Player>(p)).handLimit += n;
+  };
+  ctx["add_cut_cost_delta"] = [](LuaCtx& c, int p, int n) {
+    c.e->ps(static_cast<Player>(p)).cutCostDelta += n;
+  };
+  ctx["set_cannot_attack"] = [](LuaCtx& c, int p) {
+    c.e->ps(static_cast<Player>(p)).cannotAttack = true;
+  };
+  ctx["set_cannot_basic"] = [](LuaCtx& c, int p) {
+    c.e->ps(static_cast<Player>(p)).cannotBasic = true;
+  };
+  ctx["last_damage_side"] = [](LuaCtx& c) { return c.e->last_damage_side(); };
+  ctx["last_damage_amount"] = [](LuaCtx& c) { return c.e->last_damage_amount(); };
+  ctx["last_damage_from_attack"] = [](LuaCtx& c) { return c.e->last_damage_from_attack(); };
+  ctx["used_special_count"] = [](LuaCtx& c, int p, std::string g) {
+    return c.e->used_special_count(static_cast<Player>(p), g);
+  };
+  ctx["legal_basics"] = [](LuaCtx& c, int p) {
+    std::vector<std::string> out;
+    for (int bi = 0; bi < 5; ++bi) {
+      BasicAction a = static_cast<BasicAction>(bi);
+      if (c.e->basic_legal(static_cast<Player>(p), a)) out.push_back(basic_name(a));
+    }
+    return out;
+  };
+  ctx["store_int"] = [](LuaCtx& c, std::string k, int v) { c.e->store_int(c.source, k, v); };
+  ctx["load_int"] = [](LuaCtx& c, std::string k, sol::optional<int> d) {
+    return c.e->load_int(c.source, k, d ? *d : 0);
+  };
+  ctx["on_resolve"] = [this](LuaCtx& c, sol::function f) {
+    if (c.e->currentResponding) impl_->afterAttack[c.e->currentResponding].push_back({c.who, f});
+  };
+  ctx["free_basics_of"] = [](LuaCtx& c, int p, int maxTimes, sol::table allowed) {
+    std::vector<std::string> names;
+    for (size_t i = 1;; ++i) {
+      sol::object o = allowed[i];
+      if (!o.valid() || o == sol::nil) break;
+      if (o.is<std::string>()) names.push_back(o.as<std::string>());
+    }
+    c.e->free_basics_of(static_cast<Player>(p), maxTimes, names);
+  };
+
+  auto ev = L.new_usertype<LuaEvent>("Event");
+  ev["type"] = [](LuaEvent& e) { return e.type; };
+  ev["subject"] = [](LuaEvent& e) { return static_cast<int>(e.subject); };
+  ev["first"] = [](LuaEvent& e) { return e.first; };
+  ev["card"] = [](LuaEvent& e) { return e.card; };
+  ev["attacker"] = [](LuaEvent& e) { return e.atk ? static_cast<int>(e.atk->attacker) : -1; };
+  ev["attack"] = [](LuaEvent& e, sol::this_state ts) -> sol::object {
+    if (!e.atk) return sol::make_object(ts.L, sol::nil);
+    return sol::make_object(ts.L, LuaAttack{e.atk, e.e});
+  };
 }
 
 EffectHost::~EffectHost() = default;
@@ -398,7 +503,24 @@ void EffectHost::load_file(const std::string& path, std::vector<CardDef>& defs) 
       auto dot = d.set.find('.');
       d.goddess = dot == std::string::npos ? d.set : d.set.substr(0, dot);
     }
+    d.goddesses.push_back(d.goddess);
     d.form = t.get_or("form", std::string("O"));
+    // dual-goddess cards (合奏) can list additional goddesses
+    sol::object gg = t["goddesses"];
+    if (gg.is<sol::table>())
+      for (auto& kv : static_cast<sol::table>(gg))
+        if (kv.second.is<std::string>()) {
+          std::string g = kv.second.as<std::string>();
+          if (std::find(d.goddesses.begin(), d.goddesses.end(), g) == d.goddesses.end())
+            d.goddesses.push_back(g);
+        }
+    sol::object g2 = t["goddess2"];
+    if (g2.is<std::string>()) {
+      std::string g = g2.as<std::string>();
+      if (std::find(d.goddesses.begin(), d.goddesses.end(), g) == d.goddesses.end())
+        d.goddesses.push_back(g);
+    }
+    d.auraMax = t.get_or("aura_max", -1);
     d.local = t.get_or("num", 0);
     d.name = t.get_or("name", std::string(""));
     std::string kind = t.get_or("kind", std::string("normal"));
@@ -433,6 +555,10 @@ void EffectHost::load_file(const std::string& path, std::vector<CardDef>& defs) 
     if (cont.is<sol::table>())
       for (auto& c2 : static_cast<sol::table>(cont))
         if (c2.second.is<sol::table>()) h.continuous.push_back(c2.second);
+    sol::object trig = t["triggers"];
+    if (trig.is<sol::table>())
+      for (auto& tr : static_cast<sol::table>(trig))
+        if (tr.second.is<sol::table>()) h.triggers.push_back(tr.second);
     sol::object rst = t["reset"];
     if (rst.is<sol::table>()) {
       sol::table rt = rst;
@@ -593,6 +719,52 @@ bool EffectHost::eval_pred(Engine& e, int defId, const char* hook, Player who, i
 ResetInfo EffectHost::reset_info(int defId) const {
   if (defId < 0 || defId >= static_cast<int>(impl_->hooks.size())) return {};
   return impl_->hooks[static_cast<size_t>(defId)].reset;
+}
+
+void EffectHost::fire(Engine& e, const std::string& event, Player subject, Attack* atk, int card,
+                      bool first) {
+  for (int oi = 0; oi < 2; ++oi) {
+    Player owner = (oi == 0) ? e.st.active : opp(e.st.active);
+    std::vector<int> cards;
+    for (int inst : e.ps(owner).enhance) cards.push_back(inst);
+    for (int inst : e.ps(owner).special)
+      if (e.ci(inst).faceUp) cards.push_back(inst);
+    for (int inst : cards) {
+      const CardDef& d = e.def_of(inst);
+      const auto& h = impl_->hooks[static_cast<size_t>(d.id)];
+      for (const sol::table& t : h.triggers) {
+        if (t.get_or("event", std::string()) != event) continue;
+        LuaCtx c{&e, owner, inst};
+        LuaEvent le{&e, event, subject, atk, card, first};
+        sol::object cond = t["cond"];
+        if (cond.is<sol::function>()) {
+          auto r = cond.as<sol::function>()(c, le);
+          if (!r.valid() || !r.get<bool>()) continue;
+        }
+        sol::object run = t["run"];
+        if (run.is<sol::function>()) {
+          auto r = run.as<sol::function>()(c, le);
+          if (!r.valid())
+            std::fprintf(stderr, "[lua error] trigger %s in %d: %s\n", event.c_str(), d.id,
+                         sol::error(r).what());
+        }
+      }
+    }
+  }
+}
+
+void EffectHost::run_after_attack(Engine& e, Attack* a) {
+  auto it = impl_->afterAttack.find(a);
+  if (it == impl_->afterAttack.end()) return;
+  auto list = std::move(it->second);
+  impl_->afterAttack.erase(it);
+  for (auto& [owner, f] : list) {
+    LuaCtx c{&e, owner, -1};
+    LuaAttack ha{a, &e};
+    auto r = f(c, ha);
+    if (!r.valid())
+      std::fprintf(stderr, "[lua error] on_resolve: %s\n", sol::error(r).what());
+  }
 }
 
 bool EffectHost::eval_reset_cond(Engine& e, int defId, Player who, int inst) {

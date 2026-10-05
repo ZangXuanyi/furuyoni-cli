@@ -86,4 +86,86 @@ return {
     playable = function(ctx) return ctx:desperation(ctx:player()) end,
     attack = { range = {1, 4}, damage = { aura = 5, life = 5 } } },
 
+  ---------------------------------------------------------------------------
+  -- 变格 A1 古刀  (num 必须与 O 同编号对应，用于替代)
+  ---------------------------------------------------------------------------
+  { set = "yurina.A1", form = "A1", num = 1, name = "乱打", kind = "normal", type = "attack",
+    attack = function(ctx)
+      if ctx:desperation(ctx:player()) then
+        return { range = {2, 2}, damage = { aura = 2, life = 3 }, keywords = { "unrespondable" } }
+      end
+      return { range = {2, 2}, damage = { aura = 2, life = 1 } }
+    end },
+
+  { set = "yurina.A1", form = "A1", num = 6, name = "暴沙雷", kind = "normal", type = "enhance",
+    nagi = 1, response = true,
+    on_discard = function(ctx)
+      ctx:attack { range = {0, 4}, damage = { aura = 1 }, keywords = { "unrespondable" } }
+      ctx:cower(ctx:opp())
+    end },
+
+  { set = "yurina.A1", form = "A1", num = 2, name = "浦波岚·不完全体", kind = "special",
+    type = "attack", cost = 5, response = true,
+    attack = { range = {0, 10}, damage = { aura = 3 } },
+    on_play = function(ctx)
+      local a = ctx:responding_attack()
+      if a then a:add { aura = -3 } end
+    end },
+
+  ---------------------------------------------------------------------------
+  -- 变格 A2 心
+  ---------------------------------------------------------------------------
+  { set = "yurina.A2", form = "A2", num = 3, name = "问答", kind = "normal", type = "attack",
+    attack = function(ctx) return { range = {2, 5}, damage = { aura = 3 }, evade = 3 } end,
+    on_attack_after = function(ctx)
+      local me = ctx:player()
+      local opts = ctx:legal_basics(me)
+      if #opts == 0 then return end
+      local pick = ctx:choose("问答：执行一次基本动作", opts)
+      local name = opts[pick]
+      ctx:do_basic(me, name)
+      ctx:do_basic(ctx:opp(), name)
+    end },
+
+  { set = "yurina.A2", form = "A2", num = 7, name = "终始", kind = "normal", type = "enhance",
+    nagi = 3,
+    triggers = {
+      { event = "aura_changed",
+        cond = function(ctx, ev) return ev:subject() ~= ctx:player() end,
+        run = function(ctx, ev)
+          local c = ctx:choose("终始", { "1虚到自装", "1虚到自气", "进行攻击【3-5 2/1】" })
+          if c == 1 then
+            ctx:move("dust", "aura", 1, ctx:player(), ctx:player())
+          elseif c == 2 then
+            ctx:move("dust", "flare", 1, ctx:player(), ctx:player())
+          else
+            ctx:attack { range = {3, 5}, damage = { aura = 2, life = 1 } }
+          end
+        end },
+    } },
+
+  { set = "yurina.A2", form = "A2", num = 1, name = "神座渡", kind = "special", type = "attack",
+    full_power = true,
+    cost = function(ctx)
+      local x = ctx:flare(ctx:player())
+      ctx:store_int("X", x)  -- X 在付费用前锁定
+      return x
+    end,
+    attack = function(ctx)
+      local x = ctx:load_int("X", 0)
+      return { range = {0, 5}, damage = { aura = x, life = 2 } }
+    end,
+    on_attack_after = function(ctx)
+      local x = ctx:load_int("X", 0)
+      ctx:free_basics_of(ctx:player(), x, { "aura", "flare" })
+      -- 选择 X 张使用过的切牌（神座渡除外）设为未使用
+      local pool = {}
+      for _, inst in ipairs(ctx:used_specials(ctx:player())) do
+        if inst ~= ctx:source_inst() then pool[#pool + 1] = inst end
+      end
+      local sel = ctx:choose_cards("神座渡：重置切牌", pool, 0, x)
+      for _, inst in ipairs(sel) do ctx:reset_special(inst) end
+      ctx:add_hand_limit(ctx:player(), x)
+    end },
+
 }

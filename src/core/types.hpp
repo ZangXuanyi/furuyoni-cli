@@ -33,6 +33,7 @@ enum AttackFlag : uint32_t {
   AF_Lock = 1u << 1,           // 锁定
   AF_Overwhelm = 1u << 2,      // 超克
   AF_BothSides = 1u << 3,      // 两侧伤害：装伤与命伤同时结算
+  AF_NoSpecialResponse = 1u << 4,  // "切牌不可对"：只能被常规牌对应
 };
 
 // A set of inclusive integer spans, e.g. {5,9} or {{1,3},{5,6}}.

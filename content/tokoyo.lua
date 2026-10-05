@@ -100,4 +100,103 @@ return {
       ctx:cower(ctx:opp())
     end },
 
+  ---------------------------------------------------------------------------
+  -- 变格 A1 笛
+  ---------------------------------------------------------------------------
+  { set = "tokoyo.A1", form = "A1", num = 1, name = "奏流", kind = "normal", type = "attack",
+    attack = function(ctx)
+      local kw = {}
+      if ctx:used_special_count(ctx:player(), "tokoyo") > 0 then kw[#kw + 1] = "unrespondable" end
+      return { range = {5, 5}, damage = { life = 1 }, keywords = kw }
+    end,
+    on_attack_after = function(ctx)
+      local me = ctx:player()
+      local other = false
+      for _, inst in ipairs(ctx:used_specials(me)) do
+        if not ctx:card_is_goddess(inst, "tokoyo") then other = true end
+      end
+      if ctx:shinkyou(me) or other then
+        local c = ctx:choose("奏流：置于牌库顶或牌库底", { "牌库顶", "牌库底" })
+        if c == 1 then ctx:to_deck_top(ctx:source_inst()) else ctx:to_deck_bottom(ctx:source_inst()) end
+      end
+    end },
+
+  { set = "tokoyo.A1", form = "A1", num = 4, name = "合奏", kind = "normal", type = "attack",
+    response = true, goddess2 = "saine",
+    attack = { range = {2, 5}, damage = { aura = 3, life = 0 } },
+    on_play = function(ctx)
+      local me = ctx:player()
+      if ctx:used_special_count(me, "saine") > 0 then
+        ctx:move("aura", "dust", 1, ctx:opp(), ctx:opp())
+      end
+      if ctx:hasso(me) or ctx:shinkyou(me) then ctx:move("dust", "distance", 1) end
+      if ctx:used_special_count(me, "tokoyo") > 0 then
+        ctx:move("dust", "aura", 1, me, me)
+      end
+    end },
+
+  { set = "tokoyo.A1", form = "A1", num = 3, name = "二重奏·吹弹阳明", kind = "special",
+    type = "action", cost = function(ctx) return ctx:shinkyou(ctx:player()) and 0 or 1 end,
+    on_play = function(ctx) ctx:set_cannot_basic(ctx:player()) end,
+    triggers = {
+      { event = "responded_with",
+        cond = function(ctx, ev)
+          return ev:subject() == ctx:player() and not ctx:card_is_goddess(ev:card(), "tokoyo")
+        end,
+        run = function(ctx, ev)
+          local pile = ctx:discard_pile(ctx:player())
+          if #pile == 0 then return end
+          local sel = ctx:choose_cards("放回牌库底", pile, 0, 1)
+          for _, inst in ipairs(sel) do ctx:to_deck_bottom(inst) end
+        end },
+    },
+    reset = { kind = "immediate", cond = function(ctx)
+      return ctx:last_damage_from_attack() and ctx:last_damage_side() == 2
+    end } },
+
+  ---------------------------------------------------------------------------
+  -- 变格 A2 恐怖
+  ---------------------------------------------------------------------------
+  { set = "tokoyo.A2", form = "A2", num = 2, name = "畏掠", kind = "normal", type = "attack",
+    response = true,
+    attack = function(ctx)
+      local spec = { range = {2, 3}, damage = { aura = 2, life = 1 } }
+      if ctx:vigor(ctx:opp()) == 0 then spec.attacker_chooses_damage = true end
+      return spec
+    end,
+    on_attack_after = function(ctx)
+      local me = ctx:player()
+      if not ctx:shinkyou(me) then return end
+      local a = ctx:responding_attack()
+      if not a then return end
+      local x, y = 0, 0
+      if ctx:last_damage_side() == 1 then
+        x = ctx:last_damage_amount()
+      elseif ctx:last_damage_side() == 2 then
+        y = ctx:last_damage_amount()
+      end
+      a:add { aura = -x, life = -y }
+    end },
+
+  { set = "tokoyo.A2", form = "A2", num = 2, name = "悠久之雪", kind = "special", type = "attack",
+    cost = 1,
+    attack = { range = {3, 5}, damage = { aura = 1, life = 1 } },
+    on_attack_after = function(ctx)
+      if ctx:last_damage_side() == 1 then
+        ctx:move("flare", "aura", 1, ctx:opp(), ctx:player())
+      end
+    end,
+    reset = { kind = "end_turn", cond = function(ctx) return ctx:vigor(ctx:opp()) == 1 end } },
+
+  { set = "tokoyo.A2", form = "A2", num = 3, name = "徒寄之八重樱", kind = "special",
+    type = "action", cost = 4, aura_max = 8,
+    on_play = function(ctx) ctx:move("dust", "aura", 5, ctx:player(), ctx:player()) end,
+    triggers = {
+      { event = "turn_start",
+        cond = function(ctx, ev)
+          return ev:subject() == ctx:player() and ctx:aura(ctx:player()) >= 6
+        end,
+        run = function(ctx, ev) ctx:attack { range = {0, 8}, damage = { life = 1 } } end },
+    } },
+
 }

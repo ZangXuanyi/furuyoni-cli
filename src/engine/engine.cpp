@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -238,7 +239,7 @@ void Engine::add_crystals(AreaRef a, int n) {
       st.p[a.p].life = std::clamp(st.p[a.p].life + n, 0, st.maxLife);
       break;
     case AreaKind::Aura:
-      st.p[a.p].aura = std::clamp(st.p[a.p].aura + n, 0, st.maxAura);
+      st.p[a.p].aura = std::clamp(st.p[a.p].aura + n, 0, max_aura(a.p));
       break;
     case AreaKind::Flare:    st.p[a.p].flare = std::max(0, st.p[a.p].flare + n); break;
     case AreaKind::Distance: st.distance = std::max(0, st.distance + n); break;
@@ -256,13 +257,16 @@ int Engine::move_crystals(AreaRef from, AreaRef to, int n, bool cardEffect) {
   int cap = std::numeric_limits<int>::max();
   switch (to.kind) {
     case AreaKind::Life: cap = st.maxLife - st.p[to.p].life; break;
-    case AreaKind::Aura: cap = st.maxAura - st.p[to.p].aura; break;
+    case AreaKind::Aura: cap = max_aura(to.p) - st.p[to.p].aura; break;
     default: break;
   }
   int moved = std::min({n, amount(from), cap});
   if (moved <= 0) return 0;
+  int a0 = st.p[P0].aura, a1 = st.p[P1].aura;
   add_crystals(from, -moved);
   add_crystals(to, moved);
+  if (st.p[P0].aura != a0) notify_aura_changed(P0);
+  if (st.p[P1].aura != a1) notify_aura_changed(P1);
   return moved;
 }
 
@@ -310,8 +314,10 @@ void Engine::spend_aura(Player target, int n) {
 }
 
 int Engine::cut_cost(Player p, int defId, int inst) {
-  if (effects_->has_hook(defId, "cost")) return std::max(0, effects_->eval_cost(*this, defId, p, inst));
-  return std::max(0, def(defId).cost);
+  int base = effects_->has_hook(defId, "cost")
+                 ? std::max(0, effects_->eval_cost(*this, defId, p, inst))
+                 : std::max(0, def(defId).cost);
+  return std::max(0, base + ps(p).cutCostDelta);
 }
 
 bool Engine::playable_card(Player p, int inst) {
@@ -415,7 +421,7 @@ void Engine::on_life_loss(Player p, int amount, bool triggerBreak) {
       ok = amount >= ri.lifeThreshold;
     else if (ri.hasCond)
       ok = effects_->eval_reset_cond(*this, d.id, p, inst);
-    if (ok && ci(inst).zone == Zone::Special) ci(inst).faceUp = false;
+    if (ok) reset_special(inst);
   }
 }
 
@@ -434,6 +440,7 @@ void Engine::break_enhances(Player p) {
     move_card(inst, Zone::Cover);
     ci(inst).faceUp = false;
   }
+  clamp_aura(p);  // a card providing bonus aura may have left play
 }
 
 void Engine::consume_enhance_crystal(int inst) {
@@ -471,23 +478,41 @@ Attack Engine::make_attack(Player p, int inst, bool asResponse, bool consumePend
   a.aura = ea.damage.aura;
   a.life = ea.damage.life;
   a.keywords = ea.keywords;
+  a.evadeCover = ea.evade;
+  a.attackerChoosesDamage = ea.attackerChooses;
   effects_->finalize_attack(*this, p, a, consumePending);
+  // Fire "attack declared" only for real declarations during the attacker's own turn.
+  if (consumePending && a.attacker == st.active) {
+    attacksThisTurn_[a.attacker] += 1;
+    fire("attack_declared", a.attacker, &a, -1, attacksThisTurn_[a.attacker] == 1);
+  }
   return a;
 }
 
 void Engine::apply_damage_to(Player target, std::optional<int> aura, std::optional<int> life,
-                             uint32_t keywords, int sourceInst) {
+                             uint32_t keywords, int sourceInst, int chooser, bool fromAttack) {
   (void)sourceInst;
   std::optional<int> effA = aura, effL = life;
   if (effA && !(keywords & AF_Overwhelm)) *effA = std::min(*effA, 5);
   if (effA && *effA < 0) *effA = 0;
   if (effL && *effL < 0) *effL = 0;
   bool canAura = effA.has_value() && effective_armor(target) >= *effA;
+  lastDmgFromAttack_ = fromAttack;
 
   if (keywords & AF_BothSides) {
     // 两侧伤害: resolve the aura side (like X/-) and the life side (like -/Y).
-    if (effA) spend_aura(target, std::min(*effA, effective_armor(target)));
-    if (effL) damage_life(target, *effL, AreaKind::Flare, true);
+    if (effA) {
+      int n = std::min(*effA, effective_armor(target));
+      spend_aura(target, n);
+      lastDmgSide_ = 1;
+      lastDmgAmount_ = n;
+    }
+    if (effL) {
+      int before = ps(target).life;
+      damage_life(target, *effL, AreaKind::Flare, true);
+      lastDmgSide_ = 2;
+      lastDmgAmount_ = before - ps(target).life;
+    }
   } else if (effA && effL && canAura) {
     Request r;
     r.kind = "damage";
@@ -499,15 +524,28 @@ void Engine::apply_damage_to(Player target, std::optional<int> aura, std::option
     ol.label = "take " + std::to_string(*effL) + " life damage";
     ol.data = {{"side", "life"}, {"amount", *effL}};
     r.options = {oa, ol};
-    int idx = ask_one(target, std::move(r));
-    if (idx == 0)
+    Player decider = chooser >= 0 ? static_cast<Player>(chooser) : target;
+    int idx = ask_one(decider, std::move(r));
+    if (idx == 0) {
       spend_aura(target, *effA);
-    else
+      lastDmgSide_ = 1;
+      lastDmgAmount_ = *effA;
+    } else {
+      int before = ps(target).life;
       damage_life(target, *effL, AreaKind::Flare, true);
+      lastDmgSide_ = 2;
+      lastDmgAmount_ = before - ps(target).life;
+    }
   } else if (effA && !effL) {
-    spend_aura(target, *effA);
+    int n = std::min(*effA, effective_armor(target));
+    spend_aura(target, n);
+    lastDmgSide_ = 1;
+    lastDmgAmount_ = n;
   } else if (effL) {
+    int before = ps(target).life;
     damage_life(target, *effL, AreaKind::Flare, true);
+    lastDmgSide_ = 2;
+    lastDmgAmount_ = before - ps(target).life;
   }
   check_win();
 }
@@ -530,6 +568,7 @@ void Engine::resolve_attack(Attack& a) {
     auto consider = [&](int inst) {
       const CardDef& d = def_of(inst);
       if (d.flags & CF_FullPower) return;
+      if ((a.keywords & AF_NoSpecialResponse) && d.kind == CardKind::Special) return;
       if (!respondable_card(target, inst)) return;
       if (d.type == CardType::Attack) {
         Attack tmp = make_attack(target, inst, true, false);
@@ -560,6 +599,7 @@ void Engine::resolve_attack(Attack& a) {
       if (idx > 0 && idx <= static_cast<int>(resp.size())) {
         int chosen = resp[static_cast<size_t>(idx - 1)];
         play_card(target, chosen, true);
+        fire("responded_with", target, nullptr, chosen, false);
         if (st.over) {
           currentResponding = prev;
           return;
@@ -573,13 +613,34 @@ void Engine::resolve_attack(Attack& a) {
   if (!(a.keywords & AF_Lock) && !a.range.contains(st.distance)) a.missed = true;
   if (a.negated || a.missed) return;
 
+  // ---- 问答: defender may skip the damage by covering the top of their deck ----
+  if (a.evadeCover > 0) {
+    Request r;
+    r.kind = "option";
+    r.prompt = "take the damage, or cover cards and take none?";
+    r.options.push_back({"take damage", true, {}});
+    r.options.push_back({"cover " + std::to_string(a.evadeCover) + " and take no damage", true, {}});
+    int idx = ask_one(target, std::move(r));
+    if (idx == 1) {
+      for (int k = 0; k < a.evadeCover && !ps(target).deck.empty(); ++k) {
+        int inst = ps(target).deck.back();
+        move_card(inst, Zone::Cover);
+        ci(inst).faceUp = false;
+      }
+      a.hit = true;
+      return;
+    }
+  }
+
   // ---- damage --------------------------------------------------------------
   std::optional<int> effA = a.aura;
   std::optional<int> effL = a.life;
   if (effA) *effA += a.auraDelta;
   if (effL) *effL += a.lifeDelta;
-  apply_damage_to(target, effA, effL, a.keywords, a.sourceInst);
+  apply_damage_to(target, effA, effL, a.keywords, a.sourceInst,
+                  a.attackerChoosesDamage ? a.attacker : -1, true);
   a.hit = true;
+  effects_->run_after_attack(*this, &a);
 }
 
 // ---------------------------------------------------------------------------
@@ -628,8 +689,10 @@ void Engine::play_card(Player p, int inst, bool asResponse) {
         }
         fromDust = loDust + ask_one(p, std::move(r));
       }
+      int auraBefore = ps(p).aura;
       add_crystals(AreaRef::dust(), -fromDust);
       add_crystals(AreaRef::aura(p), -(take - fromDust));
+      if (ps(p).aura != auraBefore) notify_aura_changed(p);
       if (d.kind == CardKind::Normal)
         move_card(inst, Zone::Enhance);
       else
@@ -679,9 +742,9 @@ void Engine::start_phase(Player p) {
 bool Engine::basic_legal(Player p, BasicAction a) const {
   switch (a) {
     case BasicAction::Advance:
-      return st.distance > st.nearDistance && st.distance >= 1 && ps(p).aura < st.maxAura;
+      return st.distance > st.nearDistance && st.distance >= 1 && ps(p).aura < max_aura(p);
     case BasicAction::Retreat: return ps(p).aura >= 1;
-    case BasicAction::Aura:    return st.dust >= 1 && ps(p).aura < st.maxAura;
+    case BasicAction::Aura:    return st.dust >= 1 && ps(p).aura < max_aura(p);
     case BasicAction::Flare:   return ps(p).aura >= 1;
     case BasicAction::Escape:  return st.distance <= st.nearDistance && st.dust >= 1;
   }
@@ -721,9 +784,104 @@ void Engine::free_basics(Player p, int maxTimes) {
   }
 }
 
+void Engine::free_basics_of(Player p, int maxTimes, const std::vector<std::string>& allowed) {
+  auto allowed_basic = [&](BasicAction a) {
+    const char* n = basic_name(a);
+    for (const auto& s : allowed)
+      if (s == n) return true;
+    return false;
+  };
+  for (int i = 0; i < maxTimes; ++i) {
+    if (st.over) return;
+    std::vector<BasicAction> legal;
+    for (int bi = 0; bi < 5; ++bi) {
+      BasicAction ba = static_cast<BasicAction>(bi);
+      if (allowed_basic(ba) && basic_legal(p, ba)) legal.push_back(ba);
+    }
+    if (legal.empty()) return;
+    Request r;
+    r.kind = "option";
+    r.prompt = "free basic action";
+    for (BasicAction ba : legal)
+      r.options.push_back({std::string("basic: ") + basic_name(ba), true, {}});
+    r.options.push_back({"stop", true, {}});
+    int idx = ask_one(p, std::move(r));
+    if (idx >= static_cast<int>(legal.size())) return;
+    do_basic(p, legal[static_cast<size_t>(idx)]);
+  }
+}
+
+int Engine::max_aura(Player p) const {
+  int m = st.maxAura;
+  for (int inst : ps(p).enhance) {
+    const CardDef& d = def_of(inst);
+    if (d.auraMax > m) m = d.auraMax;
+  }
+  for (int inst : ps(p).special)
+    if (ci(inst).faceUp) {
+      const CardDef& d = def_of(inst);
+      if (d.auraMax > m) m = d.auraMax;
+    }
+  return m;
+}
+
+int Engine::effective_hand_limit(Player p) const { return ps(p).handLimit; }
+
+bool Engine::card_has_goddess(int inst, const std::string& g) const {
+  const CardDef& d = def_of(inst);
+  return d.goddess == g || std::find(d.goddesses.begin(), d.goddesses.end(), g) != d.goddesses.end();
+}
+
+int Engine::used_special_count(Player p, const std::string& g) const {
+  int c = 0;
+  for (int inst : ps(p).special)
+    if (ci(inst).faceUp && card_has_goddess(inst, g)) c++;
+  return c;
+}
+
+void Engine::reset_special(int inst) {
+  if (ci(inst).zone == Zone::Special && ci(inst).faceUp) {
+    ci(inst).faceUp = false;
+    clamp_aura(ci(inst).owner);
+  }
+}
+
+void Engine::clamp_aura(Player p) {
+  int over = ps(p).aura - max_aura(p);
+  if (over > 0) {
+    ps(p).aura -= over;
+    st.dust += over;  // 自装中多于上限的部分移到虚
+  }
+}
+
+void Engine::die(Player p) {
+  // Lose all remaining life as life damage so crystals are conserved (life -> flare).
+  damage_life(p, ps(p).life, AreaKind::Flare, true);
+  check_win();
+}
+
+void Engine::store_int(int inst, const std::string& key, int v) { vars_[{inst, key}] = v; }
+int Engine::load_int(int inst, const std::string& key, int def) const {
+  auto it = vars_.find({inst, key});
+  return it == vars_.end() ? def : it->second;
+}
+
+void Engine::end_current_main() { abortMain_ = true; }
+
+void Engine::fire(const char* event, Player subject, Attack* atk, int card, bool first) {
+  if (effects_) effects_->fire(*this, event, subject, atk, card, first);
+}
+
+void Engine::notify_aura_changed(Player p) {
+  if (auraChangeFired_[p]) return;  // only the first change this turn
+  auraChangeFired_[p] = 1;
+  fire("aura_changed", p, nullptr, -1, true);
+}
+
 void Engine::main_phase(Player p) {
   mainDirty_ = false;
   while (!st.over) {
+    if (abortMain_) break;
     struct Move {
       enum K { Basic, Play, Pass } k = Pass;
       BasicAction basic = BasicAction::Advance;
@@ -738,7 +896,7 @@ void Engine::main_phase(Player p) {
     r.prompt = "main phase action";
     bool canPay = ps(p).vigor >= 1 || !ps(p).hand.empty();
 
-    if (canPay) {
+    if (canPay && !ps(p).cannotBasic) {
       for (int bi = 0; bi < 5; ++bi) {
         BasicAction ba = static_cast<BasicAction>(bi);
         if (!basic_legal(p, ba)) continue;
@@ -765,6 +923,7 @@ void Engine::main_phase(Player p) {
       bool fp = (d.flags & CF_FullPower) != 0;
       if (fp && mainDirty_) continue;
       if (!playable_card(p, inst)) continue;
+      if (d.type == CardType::Attack && ps(p).cannotAttack) continue;
       if (d.type == CardType::Attack) {
         Attack tmp = make_attack(p, inst, false, false);
         if (!tmp.range.contains(st.distance)) continue;
@@ -792,6 +951,7 @@ void Engine::main_phase(Player p) {
       if (!playable_card(p, inst)) continue;
       bool fp = (d.flags & CF_FullPower) != 0;
       if (fp && mainDirty_) continue;
+      if (d.type == CardType::Attack && ps(p).cannotAttack) continue;
       if (d.type == CardType::Attack) {
         Attack tmp = make_attack(p, inst, false, false);
         if (!tmp.range.contains(st.distance)) continue;
@@ -852,10 +1012,11 @@ void Engine::main_phase(Player p) {
     }
     check_win();
   }
+  abortMain_ = false;
 }
 
 void Engine::cover_phase(Player p) {
-  while (!st.over && ps(p).hand.size() >= 3) {
+  while (!st.over && static_cast<int>(ps(p).hand.size()) > effective_hand_limit(p)) {
     Request r;
     r.kind = "cards";
     r.prompt = "cover a card (hand must be <= 2)";
@@ -882,7 +1043,7 @@ void Engine::end_phase(Player p) {
     ResetInfo ri = effects_->reset_info(d.id);
     if (ri.kind != 1) continue;
     bool ok = ri.hasCond ? effects_->eval_reset_cond(*this, d.id, p, inst) : false;
-    if (ok) ci(inst).faceUp = false;
+    if (ok) reset_special(inst);
   }
 }
 
@@ -895,6 +1056,19 @@ void Engine::play_turn(Player p) {
   ps(P0).cardsPlayedThisTurn = 0;
   ps(P1).cardsPlayedThisTurn = 0;
   effects_->clear_pending_mods(true);
+  for (int i = 0; i < 2; ++i) {
+    Player pl = static_cast<Player>(i);
+    ps(pl).handLimit = 2;
+    ps(pl).cutCostDelta = 0;
+    ps(pl).cannotAttack = false;
+    ps(pl).cannotBasic = false;
+    attacksThisTurn_[i] = 0;
+    auraChangesThisTurn_[i] = 0;
+    auraChangeFired_[i] = 0;
+    attackFirstFired_[i] = 0;
+  }
+  abortMain_ = false;
+  fire("turn_start", p, nullptr, -1, false);
   if (!ps(p).firstTurnDone) {
     ps(p).firstTurnDone = true;  // first turn of each player skips the start phase
   } else {
@@ -909,7 +1083,47 @@ void Engine::play_turn(Player p) {
 // setup
 // ---------------------------------------------------------------------------
 
-void Engine::setup_player(Player p, const std::vector<std::string>& sets) {
+std::vector<std::string> Engine::available_forms(const std::string& g) const {
+  std::vector<std::string> forms{"O"};
+  for (const CardDef& d : defs)
+    if (d.goddess == g && d.form != "O" &&
+        std::find(forms.begin(), forms.end(), d.form) == forms.end())
+      forms.push_back(d.form);
+  return forms;
+}
+
+std::vector<int> Engine::deck_def_ids(const std::string& g, const std::string& f) const {
+  std::map<std::pair<int, int>, int> chosen;
+  for (const CardDef& d : defs)
+    if (d.goddess == g && d.form == "O") chosen[{static_cast<int>(d.kind), d.local}] = d.id;
+  if (f != "O")
+    for (const CardDef& d : defs)
+      if (d.goddess == g && d.form == f)
+        chosen[{static_cast<int>(d.kind), d.local}] = d.id;
+  std::vector<int> out;
+  for (const auto& [key, id] : chosen) out.push_back(id);
+  return out;
+}
+
+void Engine::setup_player(Player p, const std::vector<std::pair<std::string, std::string>>& picks) {
+  std::vector<int> normals, specials;
+  std::vector<std::string> setIds;
+  for (const auto& [g, f] : picks) {
+    setIds.push_back(f == "O" ? g : g + "." + f);
+    for (int defId : deck_def_ids(g, f)) {
+      int inst = add_instance(defId, p);
+      if (def(defId).kind == CardKind::Normal)
+        normals.push_back(inst);
+      else
+        specials.push_back(inst);
+    }
+  }
+  playerSets_[p] = setIds;
+
+  build_from_pool(p, normals, specials);
+}
+
+void Engine::setup_player_sets(Player p, const std::vector<std::string>& sets) {
   playerSets_[p] = sets;
   std::vector<int> normals, specials;
   for (const CardDef& d : defs) {
@@ -920,7 +1134,10 @@ void Engine::setup_player(Player p, const std::vector<std::string>& sets) {
     else
       specials.push_back(inst);
   }
+  build_from_pool(p, normals, specials);
+}
 
+void Engine::build_from_pool(Player p, std::vector<int>& normals, std::vector<int>& specials) {
   auto choose = [&](std::vector<int>& pool, int want, const char* what) {
     if (pool.empty()) return;
     Request r;
@@ -943,7 +1160,6 @@ void Engine::setup_player(Player p, const std::vector<std::string>& sets) {
     std::vector<int> chosen;
     for (int i : d.indices)
       if (i >= 0 && i < static_cast<int>(pool.size())) chosen.push_back(pool[static_cast<size_t>(i)]);
-    // pad if the agent under-selected
     for (int inst : pool) {
       if (static_cast<int>(chosen.size()) >= need) break;
       if (!vec_has(chosen, inst)) chosen.push_back(inst);
@@ -956,47 +1172,58 @@ void Engine::setup_player(Player p, const std::vector<std::string>& sets) {
         move_card(inst, Zone::Deck);
       }
     }
-    // under-selected extras remain Removed
   };
-
   choose(normals, 7, "normal cards");
   choose(specials, 3, "special cards");
   st.rng.shuffle(ps(p).deck);
 }
 
-std::vector<std::string> Engine::draft_pick(Player p) {
-  const std::vector<std::string>& pool = cfg.draftPool;
+std::vector<std::pair<std::string, std::string>> Engine::draft_pick(Player p) {
+  std::vector<std::pair<std::string, std::string>> opts;
+  for (const auto& g : cfg.draftPool)
+    for (const auto& f : available_forms(g)) opts.push_back({g, f});
   Request r;
   r.kind = "draft_pick";
-  r.prompt = "choose three goddesses";
-  for (const auto& s : pool) {
+  r.prompt = "choose three goddesses (with form)";
+  for (const auto& [g, f] : opts) {
     Option o;
-    o.label = s;
-    o.data = {{"set", s}};
+    o.label = g + " (" + f + ")";
+    o.data = {{"goddess", g}, {"form", f}};
     r.options.push_back(o);
   }
-  r.minSel = std::min<int>(3, static_cast<int>(pool.size()));
+  r.minSel = std::min<int>(3, static_cast<int>(opts.size()));
   r.maxSel = r.minSel;
   r.state = observation(p);
   Decision d = decide(p, std::move(r));
-  std::vector<std::string> sel;
+  std::vector<std::pair<std::string, std::string>> sel;
+  auto has_goddess = [&](const std::string& g) {
+    for (auto& s : sel)
+      if (s.first == g) return true;
+    return false;
+  };
   for (int i : d.indices)
-    if (i >= 0 && i < static_cast<int>(pool.size())) sel.push_back(pool[static_cast<size_t>(i)]);
-  for (const auto& s : pool) {
+    if (i >= 0 && i < static_cast<int>(opts.size())) {
+      auto c = opts[static_cast<size_t>(i)];
+      if (!has_goddess(c.first)) sel.push_back(c);
+    }
+  for (const auto& g : cfg.draftPool) {
     if (static_cast<int>(sel.size()) >= 3) break;
-    if (std::find(sel.begin(), sel.end(), s) == sel.end()) sel.push_back(s);
+    if (has_goddess(g)) continue;
+    auto forms = available_forms(g);
+    sel.push_back({g, forms.empty() ? "O" : forms[0]});
   }
   return sel;
 }
 
-std::string Engine::draft_ban(Player p, const std::vector<std::string>& opp) {
+std::pair<std::string, std::string> Engine::draft_ban(
+    Player p, const std::vector<std::pair<std::string, std::string>>& opp) {
   Request r;
   r.kind = "draft_ban";
   r.prompt = "ban one of the opponent's goddesses";
-  for (const auto& s : opp) {
+  for (const auto& [g, f] : opp) {
     Option o;
-    o.label = s;
-    o.data = {{"set", s}};
+    o.label = g + " (" + f + ")";
+    o.data = {{"goddess", g}, {"form", f}};
     r.options.push_back(o);
   }
   r.minSel = 1;
@@ -1012,12 +1239,13 @@ void Engine::setup_match() {
   st = GameState{};
   st.rng = Rng(cfg.seed);
   if (cfg.mode == "standard") {
-    // 三拾一舍: pick 3 (secret, sync), then ban 1 of the opponent's 3 (secret, sync).
-    std::vector<std::string> p0sel = draft_pick(P0);
-    std::vector<std::string> p1sel = draft_pick(P1);
-    std::string p0bans = draft_ban(P0, p1sel);  // P0 removes one of P1's
-    std::string p1bans = draft_ban(P1, p0sel);  // P1 removes one of P0's
-    auto drop = [](std::vector<std::string>& v, const std::string& s) {
+    // 三拾一舍: pick 3 (goddess+form, secret, sync), then ban 1 of the opponent's 3.
+    auto p0sel = draft_pick(P0);
+    auto p1sel = draft_pick(P1);
+    auto p0bans = draft_ban(P0, p1sel);  // P0 removes one of P1's
+    auto p1bans = draft_ban(P1, p0sel);  // P1 removes one of P0's
+    auto drop = [](std::vector<std::pair<std::string, std::string>>& v,
+                   const std::pair<std::string, std::string>& s) {
       v.erase(std::remove(v.begin(), v.end(), s), v.end());
     };
     drop(p1sel, p0bans);
@@ -1029,8 +1257,8 @@ void Engine::setup_match() {
     ps(first).vigor = 0;
     ps(opp(first)).vigor = 1;
   } else {
-    setup_player(P0, {cfg.p0Set});
-    setup_player(P1, {cfg.p1Set});
+    setup_player_sets(P0, {cfg.p0Set});
+    setup_player_sets(P1, {cfg.p1Set});
     st.active = P0;  // 最初的决斗: 虚路的碎片 is fixed first
     ps(P0).vigor = 0;
     ps(P1).vigor = 1;

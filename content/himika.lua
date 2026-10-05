@@ -34,7 +34,6 @@ return {
       ctx:cower(ctx:opp())
       if ctx:rensha(ctx:player()) then
         ctx:next_attack_mod {
-          this_turn = false,
           match = function(ctx2, atk)
             local ad = atk:aura_damage()
             return atk:source_goddess() ~= "himika" and (ad == nil or ad < 3)
@@ -78,5 +77,33 @@ return {
       if ctx:rensha(ctx:player()) then ctx:move("dust", "distance", 2) end
     end,
     reset = { kind = "end_turn", cond = function(ctx) return ctx:hand_size(ctx:player()) == 0 end } },
+
+  ---------------------------------------------------------------------------
+  -- 变格 A1 炎
+  ---------------------------------------------------------------------------
+  { set = "himika.A1", form = "A1", num = 2, name = "火炎流", kind = "normal", type = "attack",
+    attack = function(ctx)
+      local l = 1
+      if ctx:rensha(ctx:player()) then l = l + 1 end
+      return { range = {1, 3}, damage = { aura = 2, life = l } }
+    end },
+
+  { set = "himika.A1", form = "A1", num = 5, name = "杀意", kind = "normal", type = "action",
+    on_play = function(ctx)
+      if ctx:hand_size(ctx:player()) == 0 then
+        ctx:move("aura", "dust", 2, ctx:opp(), ctx:opp())
+      end
+    end },
+
+  { set = "himika.A1", form = "A1", num = 2, name = "炎天·红绯弥香", kind = "special",
+    type = "attack", cost = 5, full_power = true,
+    attack = function(ctx)
+      local x = 8 - ctx:distance()
+      if x < 0 then x = 0 end
+      return { range = {0, 7}, damage = { aura = x, life = x }, keywords = { "unrespondable" } }
+    end,
+    on_attack_after = function(ctx)
+      if ctx:life(ctx:opp()) > 0 then ctx:die(ctx:player()) end
+    end },
 
 }
