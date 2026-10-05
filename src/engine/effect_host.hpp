@@ -1,0 +1,78 @@
+#pragma once
+// The Lua effect layer. All card *behaviour* lives here (or rather, in the Lua
+// modules this host loads); the engine itself never mentions a concrete card.
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "core/types.hpp"
+#include "engine/sol_include.hpp"
+
+namespace fy {
+
+struct CardDef;
+class Engine;
+struct Attack;
+
+// A single attack, fully evaluated (dynamic values already resolved).
+struct EvaluatedAttack {
+  Range range;
+  Damage damage;
+  uint32_t keywords = 0;
+};
+
+// How (and whether) a special card resets itself.
+//   kind: 0 = none, 1 = end-of-owner's-turn, 2 = immediate
+//   lifeThreshold >= 0  -> declarative 即再起: reset when owner loses that much
+//                          life in a single instance.
+//   hasCond             -> a Lua predicate to evaluate instead.
+struct ResetInfo {
+  int kind = 0;
+  int lifeThreshold = -1;
+  bool hasCond = false;
+};
+
+class EffectHost {
+ public:
+  EffectHost();
+  ~EffectHost();
+
+  // Load a Lua module that returns a list of card tables; append the resulting
+  // CardDefs to `defs`.
+  void load_file(const std::string& path, std::vector<CardDef>& defs);
+
+  bool has(int defId, const char* hook) const;
+
+  // Invoke a per-card hook (on_play / on_enter / on_discard / on_attack_after /
+  // on_use_after). `who` is the controller, `inst` the resolving instance.
+  void call(Engine& e, int defId, const char* hook, Player who, int inst);
+
+  // Evaluate the card's `attack` field (numbers, a table, or a Lua function).
+  EvaluatedAttack eval_attack(Engine& e, int defId, Player who, int inst, bool asResponse);
+
+  // Run this card's `continuous` hooks whose query == "attack".
+  void run_continuous_attack(Engine& e, int defId, Player who, int inst, Attack& a);
+
+  // Apply the attacker's pending "next attack" modifiers and all active
+  // continuous attack modifiers. `consumePending` removes matched modifiers.
+  void finalize_attack(Engine& e, Player attacker, Attack& a, bool consumePending);
+
+  bool has_continuous(int defId) const;
+  bool has_hook(int defId, const char* hook) const;
+
+  // Dynamic 切札 cost / playability / response capability.
+  int eval_cost(Engine& e, int defId, Player who, int inst);
+  bool eval_pred(Engine& e, int defId, const char* hook, Player who, int inst);
+
+  ResetInfo reset_info(int defId) const;
+  bool eval_reset_cond(Engine& e, int defId, Player who, int inst);
+
+  // Clear pending "next attack" modifiers; endOfTurnOnly keeps non-expiring ones.
+  void clear_pending_mods(bool endOfTurnOnly);
+
+ private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+};
+
+}  // namespace fy
