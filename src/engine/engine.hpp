@@ -26,7 +26,9 @@ struct Config {
   std::string p0Set = "hajimari.ukiro";
   std::string p1Set = "hajimari.okika";
   // Deck-sets available for the draft (Phase 2: the four O decks).
-  std::vector<std::string> draftPool = {"yurina", "saine", "himika", "tokoyo"};
+  std::vector<std::string> draftPool = {"yurina", "saine", "himika", "tokoyo", "oboro",
+                                        "yukihi", "shinra", "hagane", "chikage", "kururu",
+                                        "thallya", "raira"};
 };
 
 // A live attack instance (virtual attacks included).
@@ -39,6 +41,8 @@ struct Attack {
   std::optional<int> aura, life;
   int auraDelta = 0, lifeDelta = 0;
   uint32_t keywords = 0;
+  bool negateDamage = false;       // 驳论: negate damage but keep附加效果
+  bool counted = false;            // already counted toward 每回合攻击次数
   int evadeCover = 0;              // 问答: defender may skip damage and cover N
   bool attackerChoosesDamage = false;  // 畏掠
   bool negated = false;       // 打消
@@ -104,7 +108,7 @@ class Engine {
                    uint32_t keywords = 0);
   void rebuild(Player p, bool costLife);
   void resolve_attack(Attack& a);
-  void play_card(Player p, int inst, bool asResponse);
+  void play_card(Player p, int inst, bool asResponse, bool zenkai = false);
   void consume_enhance_crystal(int inst);
   void check_win();
 
@@ -140,6 +144,139 @@ class Engine {
   std::vector<std::string> available_forms(const std::string& goddess) const;
   std::vector<int> deck_def_ids(const std::string& goddess, const std::string& form) const;
 
+  // ---- Oboro: parts / cover play / electronic setup / EX ------------------
+  int assembled_count(Player p) const;
+  int cover_count(Player p) const { return static_cast<int>(ps(p).cover.size()); }
+  std::vector<int> unassembled_parts(Player p) const;
+  std::vector<int> assembled_parts(Player p) const;
+  void set_assembled(int inst, bool v);
+  void assemble_part(Player p, int inst);   // enforces the hard cap of 5
+  void disassemble_part(Player p, int inst);
+  int part_by_def(Player p, int def) const;
+  bool has_named_active(Player p, const std::string& name) const;
+  bool has_oboro_parts(Player p) const { return !ps(p).parts.empty(); }
+  bool current_from_cover() const;
+  void play_from_cover(Player p, int inst, bool asResponse, bool toDeckAfter);
+  void do_electronic_setup(Player p);
+  int gain_extra(Player p, const std::string& name);  // 神代枝: EX -> special zone
+  bool try_revive(Player p);                          // 最后的结晶 death window
+  int assemble_one(Player p);                         // choose an unassembled part to assemble
+  void disassemble_to(Player p, int maxCount);
+  void assemble_many(Player p, int x);
+  void remove_card(int inst);                         // move out of the game
+
+  // ---- Raira: 风雷 / 岚之力 -------------------------------------------------
+  bool raira_can(Player p, const std::string& kind, int tier) const;
+  bool raira_spend(Player p, const std::string& kind, int tier);
+  void raira_gain_restrict(Player p) { ps(p).rairaGainRestricted = true; }
+  void raira_perm_cut(Player p) { ps(p).cutCostPermanent = true; }
+  void cover_card(int inst);                          // move a card into its cover pile (face down)
+  std::string card_zone(int inst) const;
+  void use_from_cover(int inst, bool asResponse);     // 分身/鸢影: use a cover card
+  void force_unrespondable() { forceUnrespondable_ = true; }
+  bool aura_damaged_this_turn(Player p) const { return auraDamagedThisTurn_[p]; }
+  void gain_external(AreaRef a, int n);   // 神代枝: crystal added from outside the game
+  int external_added() const { return externalAdded_; }
+  void init_parts(Player p);              // give Oboro A2 its parts pool
+  void init_bag(Player p);                // give Chikage its 毒袋
+
+  // ---- Yukihi: 变貌 (weapon 伞/簪) -----------------------------------------
+  bool umbrella(Player p) const { return ps(p).umbrella; }
+  void switch_weapon(Player p, int source = -1);
+  bool shared_range(Player p) const { return has_named_active(p, "无常其心"); }
+  int enhance_crystal_total(Player p) const;
+  int cards_played_this_turn(Player p) const { return ps(p).cardsPlayedThisTurn; }
+  int dust_to_card(int inst, int n);
+  void use_card(int inst, bool asResponse);  // use a card from discard/cover
+
+  // ---- Shinra: 策略 / 封印 / 借用对手的牌 ---------------------------------
+  int strategy(Player p) const { return ps(p).strategy; }
+  void prepare_strategy(Player p);
+  void seal_card(int host, int card);
+  void return_sealed(int host);
+  void use_foreign_card(Player user, int inst);  // resolve another player's card
+  void discard_top(Player p);
+  void cover_top(Player p);
+  bool is_normal_card(int inst) const { return def_of(inst).kind == CardKind::Normal; }
+  bool is_enhance(int inst) const { return def_of(inst).type == CardType::Enhance; }
+  std::vector<int> enhances(Player p) const { return ps(p).enhance; }
+  void reuse_special(int inst);              // 诸式理解: resolve a used cut in place
+  int drain_card_crystals(int inst, int n);  // move up to n crystals from a card to 虚
+
+  // ---- Hagane: 离心 / 全开 / 炼成 ------------------------------------------
+  int distance_at_turn_start() const { return distanceAtTurnStart_; }
+  bool attacked_this_turn(Player p) const { return attackedThisTurn_[p]; }
+  bool played_centrifugal_this_turn(Player p) const { return playedCentrifugalThisTurn_[p]; }
+  bool played_liancheng_this_turn(Player p) const { return playedLianchengThisTurn_[p]; }
+  bool used_this_turn(int inst) const { return ci(inst).usedThisTurn; }
+  bool zenkai_active() const { return zenkaiActive_; }
+  bool centrifugal_ok(Player p) const {
+    return st.distance >= distanceAtTurnStart_ + 2 && !attackedThisTurn_[p];
+  }
+  std::vector<int> special_cards(Player p) const { return ps(p).special; }
+  bool is_used(int inst) const { return ci(inst).faceUp; }
+  bool is_my_turn(Player p) const { return st.active == p; }
+  void random_discard(Player p);
+  void discard_deck(Player p);
+  int find_named(Player p, const std::string& name) const;
+  int sealed_card(int host) const;
+
+  // ---- Chikage: 毒袋 / 毒 / 持续距离 ----------------------------------------
+  int distance() const;          // effective distance (raw + active distanceMods, clamped >=0)
+  int distance_delta() const;
+  bool is_poison(int inst) const { return def_of(inst).isPoison; }
+  std::vector<int> poison_bag(Player p) const { return ps(p).bag; }
+  void place_poison(int inst, Player holder, Zone z);
+  void return_poison(int inst);
+  void force_move(int inst, Zone z);   // bypass the poison discard/cover protection
+  void float_poisons(Player p);        // move poisons in p's deck to the top
+  void set_cannot_advance(Player p) { ps(p).cannotAdvance = true; }
+  bool did_basic_this_turn(Player p) const { return didBasicThisTurn_[p]; }
+
+  // ---- Kururu: 机巧 (color combinations among face-up cards) --------------
+  uint32_t card_colors(int inst) const;
+  std::string card_colors_str(int inst) const;
+  bool keisou(Player p, const std::string& combo, bool otherOnly = false) const;
+  int keisou_amount(Player p, int base);  // 骇客装置: double one 机巧 slot's numbers
+  void reveal_opponent_specials(Player p) { revealOppSpecials_[p] = true; }
+  void play_hand_card(Player p, int inst) { play_card(p, inst, false); }
+  std::vector<std::string> goddess_normal_names(Player p) const;
+  bool guess_name(Player guesser, int cardInst);  // 最终搜寻
+  bool rebuilt_this_turn(Player p) const { return rebuiltThisTurn_[p]; }
+  bool used_fullpower_this_turn(Player p) const { return usedFullPowerThisTurn_[p]; }
+  void set_pending_nagi_adjust(int n) { pendingNagiAdjust_ = n; }
+  int note_attack(Player p) { return ++attacksThisTurn_[p]; }
+  int attacks_this_turn(Player p) const { return attacksThisTurn_[p]; }
+  void add_unused_cuts(Player p);  // 最终搜寻: unused (Removed) cuts -> special zone, unused
+  int rng_below(int n) { return st.rng.below(n); }
+
+  // ---- Thallya: 蒸汽 / 气动 / 变形 ------------------------------------------
+  void burn(Player p, int x);
+  void recover(Player p, int x);
+  void pneumatic(Player p);
+  void transform(Player p, const std::string& name);
+  void reset_steam_at_turn_start();
+  std::vector<int> active_transform_defs(Player p) const;
+  bool can_burn(Player p, int x) const;
+  bool transform_is(Player p, const std::string& name) const;
+  void transform_choose(Player p);
+  void init_transforms(Player p, const std::string& form);
+  std::vector<int> transform_cards(Player p) const;
+
+  // ---- tracing / replay viewer --------------------------------------------
+  struct StackEntry {
+    int def = -1;
+    Player owner = P0;
+    bool fromCover = false;
+  };
+  void start_trace() {
+    tracing_ = true;
+    frames_ = nlohmann::json::array();
+  }
+  nlohmann::json full_state_json() const;  // everything, hidden info included
+  nlohmann::json trace_json() const;       // frames + meta + result
+  std::string result_text() const;
+
   // The attack currently being responded to (for ctx:responding_attack()).
   Attack* currentResponding = nullptr;
 
@@ -153,11 +290,36 @@ class Engine {
   bool lastDmgFromAttack_ = false;
   std::vector<std::string> playerSets_[2];
   std::map<std::pair<int, std::string>, int> vars_;
+  bool tracing_ = false;
+  nlohmann::json frames_ = nlohmann::json::array();
+  std::string phase_ = "setup";
+  std::vector<StackEntry> callStack_;
+  std::vector<std::pair<std::string, std::string>> draftPicks_[2];
+  std::pair<std::string, std::string> draftBans_[2];
+  bool hasDraft_[2] = {false, false};
   // per-turn event counters (for "first time this turn" triggers)
   int attacksThisTurn_[2] = {0, 0};
   int auraChangesThisTurn_[2] = {0, 0};
   int auraChangeFired_[2] = {0, 0};
   int attackFirstFired_[2] = {0, 0};
+  bool auraDamagedThisTurn_[2] = {false, false};
+  int normalNonYukihi_[2] = {0, 0};
+  int distanceAtTurnStart_ = 0;
+  bool attackedThisTurn_[2] = {false, false};
+  bool playedCentrifugalThisTurn_[2] = {false, false};
+  bool playedLianchengThisTurn_[2] = {false, false};
+  bool zenkaiActive_ = false;
+  bool poisonForce_ = false;
+  bool didBasicThisTurn_[2] = {false, false};
+  bool rebuiltThisTurn_[2] = {false, false};
+  bool usedFullPowerThisTurn_[2] = {false, false};
+  int pendingNagiAdjust_ = 0;
+  bool ashuraExtraUsed_[2] = {false, false};
+  bool damageToDistance_ = false;
+  bool keisouDoubled_ = false;
+  bool revealOppSpecials_[2] = {false, false};
+  bool forceUnrespondable_ = false;
+  int externalAdded_ = 0;
 
   void fire(const char* event, Player subject, Attack* atk = nullptr, int card = -1,
             bool first = false);
@@ -180,6 +342,8 @@ class Engine {
       Player p, const std::vector<std::pair<std::string, std::string>>& opp);
   void setup_player_sets(Player p, const std::vector<std::string>& sets);
   void build_from_pool(Player p, std::vector<int>& normals, std::vector<int>& specials);
+  void run_rebuild(Player p);   // normal rebuild / electronic setup decision
+  void resolve_card_effect(Player p, int inst, bool asResponse, bool zenkai = false);
   void play_turn(Player p);
   void start_phase(Player p);
   void main_phase(Player p);

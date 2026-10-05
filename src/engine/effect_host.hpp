@@ -32,9 +32,10 @@ struct TriggerSpec;
 //                          life in a single instance.
 //   hasCond             -> a Lua predicate to evaluate instead.
 struct ResetInfo {
-  int kind = 0;
+  int kind = 0;                   // 0 none, 1 end-of-turn, 2 immediate
   int lifeThreshold = -1;
   bool hasCond = false;
+  std::string trigger;            // event-based immediate reset (e.g. "weapon_switched")
 };
 
 class EffectHost {
@@ -65,6 +66,10 @@ class EffectHost {
   bool has_continuous(int defId) const;
   bool has_hook(int defId, const char* hook) const;
 
+  // Shinra 计略 (the 神算/鬼谋 effect of a card), executed with a forced branch.
+  bool has_keiryo(int defId) const;
+  void call_keiryo(Engine& e, int defId, Player who, int inst, int branch);
+
   // Dynamic 切札 cost / playability / response capability.
   int eval_cost(Engine& e, int defId, Player who, int inst);
   bool eval_pred(Engine& e, int defId, const char* hook, Player who, int inst);
@@ -80,6 +85,10 @@ class EffectHost {
 
   // Run callbacks registered via ctx:on_resolve() for an attack that just resolved.
   void run_after_attack(Engine& e, Attack* a);
+
+  // Apply a CP part effect: hook is "apply" (immediate) or "after" (attack-after);
+  // n is the number of selected additional parts.
+  void apply_part(Engine& e, int defId, Player who, Attack& a, int n, const char* hook);
 
  private:
   struct Impl;

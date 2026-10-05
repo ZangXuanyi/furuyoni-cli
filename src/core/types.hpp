@@ -14,7 +14,7 @@ enum Player : int { P0 = 0, P1 = 1 };
 inline Player opp(Player p) { return p == P0 ? P1 : P0; }
 
 // Limbo == a card currently resolving, not yet in any real zone.
-enum class Zone { Deck, Hand, Discard, Cover, Enhance, Special, Removed, Limbo };
+enum class Zone { Deck, Hand, Discard, Cover, Enhance, Special, Parts, Sealed, Bag, Removed, Limbo };
 
 enum class CardKind { Normal, Special };  // Special == 切札
 enum class CardType { Attack, Action, Enhance };
@@ -33,7 +33,22 @@ enum AttackFlag : uint32_t {
   AF_Lock = 1u << 1,           // 锁定
   AF_Overwhelm = 1u << 2,      // 超克
   AF_BothSides = 1u << 3,      // 两侧伤害：装伤与命伤同时结算
-  AF_NoSpecialResponse = 1u << 4,  // "切牌不可对"：只能被常规牌对应
+  AF_NoSpecialResponse = 1u << 4,   // "切牌不可对"：只能被常规牌对应
+  AF_NoNormalResponse = 1u << 5,    // "通常牌不可对"：只能被切牌对应
+  AF_NoEnhanceResponse = 1u << 6,   // "付与牌不可对"
+  AF_NoAttackResponse = 1u << 7,    // "攻击牌不可对"
+  AF_NoActionResponse = 1u << 8,    // "行动牌不可对"
+  AF_NoNegate = 1u << 9,            // "不可打消"：可被对应但不会被 打消
+  AF_ToDistance = 1u << 10,         // 倒车：本应进入气/虚的伤害结晶改为进入距
+};
+
+// 机巧 colors (攻击=红, 行动=蓝, 付与=绿, 对应=紫, 全力=黄).
+enum Color : uint32_t {
+  COL_RED = 1u << 0,
+  COL_BLUE = 1u << 1,
+  COL_GREEN = 1u << 2,
+  COL_PURPLE = 1u << 3,
+  COL_YELLOW = 1u << 4,
 };
 
 // A set of inclusive integer spans, e.g. {5,9} or {{1,3},{5,6}}.
