@@ -37,6 +37,27 @@ struct CardDef {
   bool playableFromCover = false;  // 回收利用：可从盖牌区如手牌使用
   int burnRequire = 0;             // 燃烧X：引擎不足 X 时不能打出
   bool isTransform = false;        // 变形光环牌（不进构筑）
+  bool unsealable = false;         // 不可封印（炼成攻击）
+  bool noOpponentPick = false;     // 不可被对手选择（炼成攻击）
+  int enemyNagiMod = 0;            // 虚伪: 对手新展开的付与牌纳 -1
+  bool damageImmune = false;       // 夙愿: 你不会受到任何伤害
+  bool decayToOwnerAura = false;   // 漫天的花道: 结晶离场改为进持有者的装（满则进气）
+  bool absorbAuraBasic = false;    // 双掌生花: 装附的结晶可改为放到此牌上
+  bool keepCrystalsOnReset = false;  // 熠熠见繁樱: 再起时保留牌上的结晶
+  bool iceAsArmor = false;         // 冰凌包覆: 自己装中的冰晶视作装
+  bool maySkipCrystalLoss = false; // 寒冰荆棘: 回合开始时可选择不移除本牌结晶
+  bool enemyNoFlare = false;       // 冻僵: 展开中对手不能聚气
+  bool dynamicNagi = false;        // 纳 由 Lua 函数动态给出（残烛式）
+  bool soloSpecials = false;       // 八叶 A1/AA1: 该形态的切札线整体取代 O 的切札线
+  std::string upgrade;             // 完全态: 升级后的牌名（八叶）
+  bool reverseMoves = false;       // 映界: 你所有要移动樱花结晶的牌都可以反向执行
+  bool complete = false;           // 八叶: 这张牌是完全态（升级版）
+  bool limitDistance = false;      // 八叶镜陨茕樱: 有效距离限制在 0..7
+  bool responseOnly = false;       // 格杀: 仅限对应打出
+  bool denyEnemyAura = false;      // 血飞沫: 进入敌装的结晶改为进虚
+  bool protectsEnemy = false;      // 阡: 本牌弃置前对手不会死亡
+  bool memoryDraw = false;         // 此目所及之物与世: 可不抽牌而取回忆区
+  bool memoryRebuildShield = false;// 此目所及之物与世: 重铸命伤可改为移除回忆区一张牌
   int distanceMod = 0;             // 展开中的持续距离修正（蹑足 -2）
   int nearDistanceMod = 0;         // 达人距离修正（圈域 +1 / 引力场 -1）
   int copies = 1;                  // number of instances to create (灭灯毒 x2)
@@ -93,7 +114,17 @@ struct PlayerState {
   bool cutCostPermanent = false;     // 缠回 使用后：所有切牌费用 -1
   std::vector<int> parts;        // Oboro parts instances (Zone::Parts)
   std::vector<int> bag;          // Chikage 毒袋 instances (Zone::Bag)
+  std::vector<int> memory;       // 八叶 回忆区 (Zone::Memory, face down / hidden)
+  int cardsPlayedTotal = 0;      // 本局打出的牌数（万叶仍未识）
+  int curse = 0;                 // 神居 诅咒（>= 16 即死亡）
+  bool hasCurse = false;         // 这局使用了神居（才会在回合开始累积诅咒）
+  std::string extraAttackCostGoddess;  // 尸: 本回合下次攻击需额外弃一张该女神的牌
   bool nextDrawOne = false;  // 夜叉: the next start phase draws only one card
+  int ice = 0;                  // 冻结: ice crystals occupying 装 slots (not 装)
+  int tempDistanceMod = 0;      // 影飞翅: this turn only (effective distance)
+  int tempNearDistanceMod = 0;  // 影飞翅: this turn only (达人距离)
+  bool skipMainPhase = false;   // 踽踽虚路行: lose the next main phase
+  bool suppressAuraRedirect = false;  // 双掌生花 打出时的那次装附不替换
   bool firstTurnDone = false;
   std::vector<int> deck, hand, discard, cover, enhance, special;
 };

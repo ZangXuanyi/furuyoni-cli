@@ -381,7 +381,9 @@ TEST_CASE("迷烟 negates card-effect distance changes but not basic actions") {
 }
 
 TEST_CASE("variant forms, deck assembly, and card replacement") {
-  Engine e;
+  Config cfg;
+  cfg.preset = "gachi-tatsujin";  // 完全战达人: 异相 enabled
+  Engine e(cfg);
   load_standard(e);
   CHECK(e.available_forms("yurina").size() == 3);
   CHECK(e.available_forms("saine").size() == 3);

@@ -119,6 +119,9 @@ inline std::vector<std::string> check_invariants(const Engine& e) {
       add("P" + std::to_string(pi) + " aura out of range: " + std::to_string(s.aura) + "/" +
           std::to_string(ma));
     if (s.flare < 0) add("P" + std::to_string(pi) + " negative flare");
+    if (s.ice < 0 || s.aura + s.ice > ma)
+      add("P" + std::to_string(pi) + " ice out of range: ice=" + std::to_string(s.ice) +
+          " aura=" + std::to_string(s.aura) + "/" + std::to_string(ma));
     if (s.vigor < 0 || s.vigor > 2)
       add("P" + std::to_string(pi) + " vigor out of range: " + std::to_string(s.vigor));
     if (s.wind < 0 || s.wind > 20)

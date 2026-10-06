@@ -51,6 +51,8 @@ nlohmann::json Engine::full_state_json() const {
     json pj;
     pj["life"] = s.life;
     pj["aura"] = s.aura;
+    pj["ice"] = s.ice;  // 冻结冰晶（公开信息）
+    pj["curse"] = s.curse;  // 诅咒（公开信息）
     pj["flare"] = s.flare;
     pj["vigor"] = s.vigor;
     pj["cower"] = s.cower;
@@ -216,7 +218,7 @@ uint64_t Engine::state_hash() const {
 
   for (int i = 0; i < 2; ++i) {
     const PlayerState& p = st.p[i];
-    put(p.life); put(p.aura); put(p.flare); put(p.vigor);
+    put(p.life); put(p.aura); put(p.ice); put(p.flare); put(p.vigor);
     putb(p.cower); putb(p.cannotRespond); put(p.lastLifeLost); put(p.cardsPlayedThisTurn);
     put(p.handLimit); put(p.cutCostDelta); putb(p.cannotAttack); putb(p.cannotBasic);
     putb(p.usedLastCrystal); putb(p.umbrella); putb(p.yukihi);
@@ -228,7 +230,8 @@ uint64_t Engine::state_hash() const {
     put(static_cast<int>(playerSets_[i].size()));
     for (const std::string& set : playerSets_[i]) puts(set);
     putv(p.deck); putv(p.hand); putv(p.discard); putv(p.cover);
-    putv(p.enhance); putv(p.special); putv(p.parts); putv(p.bag);
+    putv(p.enhance); putv(p.special); putv(p.parts); putv(p.bag); putv(p.memory);
+    put(p.cardsPlayedTotal); put(p.curse); putb(p.hasCurse); puts(p.extraAttackCostGoddess);
   }
 
   for (const CardInstance& c : st.insts) {
@@ -286,6 +289,8 @@ nlohmann::json Engine::observation(Player v) const {
     json pj;
     pj["life"] = s.life;
     pj["aura"] = s.aura;
+    pj["ice"] = s.ice;  // 冻结冰晶（公开信息）
+    pj["curse"] = s.curse;  // 诅咒（公开信息）
     pj["flare"] = s.flare;
     pj["vigor"] = s.vigor;
     pj["cower"] = s.cower;
@@ -298,6 +303,12 @@ nlohmann::json Engine::observation(Player v) const {
     pj["handCount"] = static_cast<int>(s.hand.size());
     pj["deckCount"] = static_cast<int>(s.deck.size());
     pj["coverCount"] = static_cast<int>(s.cover.size());
+    pj["memoryCount"] = static_cast<int>(s.memory.size());  // 内容对对手保密
+    if (pi == static_cast<int>(v)) {
+      json mem = json::array();
+      for (int inst : s.memory) mem.push_back(def_of(inst).name);
+      pj["memory"] = mem;
+    }
     json disc = json::array();
     for (int inst : s.discard) disc.push_back(def_of(inst).name);
     pj["discard"] = disc;

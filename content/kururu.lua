@@ -274,7 +274,7 @@ return {
       ctx:discard_top(ctx:opp())
       local pile = {}
       for _, i in ipairs(ctx:discard_pile(ctx:opp())) do
-        if ctx:is_normal_card(i) then pile[#pile + 1] = i end
+        if ctx:is_normal_card(i) and ctx:opponent_pickable(i) then pile[#pile + 1] = i end
       end
       if #pile == 0 then return end
       -- 先把选牌放在机巧之外，再按“红 + 该牌类别色 + 副类别色”着色判定

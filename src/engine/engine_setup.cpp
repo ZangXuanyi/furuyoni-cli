@@ -53,19 +53,16 @@ void Engine::assemble_many(Player p, int x) {
   }
 }
 
-std::vector<std::string> Engine::available_forms(const std::string& g) const {
-  std::vector<std::string> forms{"O"};
-  for (const CardDef& d : defs)
-    if (d.goddess == g && d.form != "O" &&
-        std::find(forms.begin(), forms.end(), d.form) == forms.end())
-      forms.push_back(d.form);
-  return forms;
-}
-
 std::vector<int> Engine::deck_def_ids(const std::string& g, const std::string& f) const {
   std::map<std::pair<int, int>, int> chosen;
+  // 八叶 A1/AA1: 该形态的切札线整体取代 O 的切札线（A1/AA1 只有 1 张切牌）。
+  bool solo = false;
+  if (f != "O")
+    for (const CardDef& d : defs)
+      if (d.goddess == g && d.form == f && d.soloSpecials) solo = true;
   for (const CardDef& d : defs)
-    if (d.goddess == g && d.form == "O" && !d.isPart && !d.isExtra && !d.isPoison && !d.isTransform)
+    if (d.goddess == g && d.form == "O" && !d.isPart && !d.isExtra && !d.isPoison &&
+        !d.isTransform && !(solo && d.kind == CardKind::Special))
       chosen[{static_cast<int>(d.kind), d.local}] = d.id;
   if (f != "O")
     for (const CardDef& d : defs)
@@ -79,9 +76,22 @@ std::vector<int> Engine::deck_def_ids(const std::string& g, const std::string& f
 void Engine::setup_player(Player p, const std::vector<std::pair<std::string, std::string>>& picks) {
   std::vector<int> normals, specials;
   std::vector<std::string> setIds;
+  // Cross-goddess bans (铳镰禁真红凶弹 / village rules).
+  std::vector<int> bannedDefs;
+  for (const ComboBan& ban : cfg.comboBans) {
+    bool has_a = false, has_b = false;
+    for (const auto& [g, f] : picks) {
+      if (g == ban.goddess_a) has_a = true;
+      if (g == ban.goddess_b) has_b = true;
+    }
+    if (!has_a || !has_b) continue;
+    for (const CardDef& d : defs)
+      if (d.name == ban.card) bannedDefs.push_back(d.id);
+  }
   for (const auto& [g, f] : picks) {
     setIds.push_back(f == "O" ? g : g + "." + f);
     for (int defId : deck_def_ids(g, f)) {
+      if (std::find(bannedDefs.begin(), bannedDefs.end(), defId) != bannedDefs.end()) continue;
       int inst = add_instance(defId, p);
       if (def(defId).kind == CardKind::Normal)
         normals.push_back(inst);
@@ -90,6 +100,8 @@ void Engine::setup_player(Player p, const std::vector<std::pair<std::string, std
     }
   }
   playerSets_[p] = setIds;
+  for (const std::string& s : setIds)
+    if (s.rfind("kamuwi", 0) == 0) ps(p).hasCurse = true;  // 神居: 启用诅咒机制
   for (const auto& [g, f] : picks) {
     if (g == "oboro" && f == "A2") init_parts(p);
     if (g == "yukihi") ps(p).yukihi = true;
@@ -336,7 +348,9 @@ void Engine::init_bag(Player p) {
 
 std::vector<std::pair<std::string, std::string>> Engine::draft_pick(Player p) {
   std::vector<std::pair<std::string, std::string>> opts;
-  for (const auto& g : cfg.draftPool)
+  const std::vector<std::string> pool =
+      cfg.draftPool.empty() ? goddess_pool() : cfg.draftPool;
+  for (const auto& g : pool)
     for (const auto& f : available_forms(g)) opts.push_back({g, f});
   Request r;
   r.kind = "draft_pick";
@@ -362,7 +376,7 @@ std::vector<std::pair<std::string, std::string>> Engine::draft_pick(Player p) {
       auto c = opts[static_cast<size_t>(i)];
       if (!has_goddess(c.first)) sel.push_back(c);
     }
-  for (const auto& g : cfg.draftPool) {
+  for (const auto& g : pool) {
     if (static_cast<int>(sel.size()) >= 3) break;
     if (has_goddess(g)) continue;
     auto forms = available_forms(g);

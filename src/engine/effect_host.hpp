@@ -71,8 +71,9 @@ class EffectHost {
   bool has_keiryo(int defId) const;
   void call_keiryo(Engine& e, int defId, Player who, int inst, int branch);
 
-  // Dynamic 切札 cost / playability / response capability.
+  // Dynamic 切札 cost / 纳 / playability / response capability.
   int eval_cost(Engine& e, int defId, Player who, int inst);
+  int eval_nagi(Engine& e, int defId, Player who, int inst);
   bool eval_pred(Engine& e, int defId, const char* hook, Player who, int inst);
 
   ResetInfo reset_info(int defId) const;
@@ -96,6 +97,9 @@ class EffectHost {
 
   // Run callbacks registered via ctx:on_resolve() for an attack that just resolved.
   void run_after_attack(Engine& e, Attack* a);
+  // Run callbacks registered via ctx:on_response() after each response resolves.
+  void run_on_response(Engine& e, Attack* a);
+  void clear_attack_callbacks(Attack* a);
 
   // Apply a CP part effect: hook is "apply" (immediate) or "after" (attack-after);
   // n is the number of selected additional parts.

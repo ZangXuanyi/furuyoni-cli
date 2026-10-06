@@ -15,6 +15,24 @@
 
 namespace fy {
 
+// A cross-goddess deck-building ban (village rule / official restriction):
+// when a player picked both goddesses a and b, the card named `card` cannot be
+// included in their build.
+struct ComboBan {
+  std::string goddess_a;
+  std::string goddess_b;
+  std::string card;
+};
+
+// One dynamically loaded content module (a Lua file providing goddess cards).
+struct ContentModule {
+  std::string path;
+  std::string pack;  // "tatsujin" | "official" | "custom" | user-defined
+  std::vector<std::string> goddesses;
+  int firstDef = 0;
+  int defCount = 0;
+};
+
 struct Config {
   int turnLimit = 40;         // 40 turns without a finish -> draw
   int perTurnSeconds = 180;   // 每回合 3min
@@ -28,10 +46,24 @@ struct Config {
   std::string mode = "hajimari";
   std::string p0Set = "hajimari.ukiro";
   std::string p1Set = "hajimari.okika";
-  // Deck-sets available for the draft (Phase 2: the four O decks).
-  std::vector<std::string> draftPool = {"yurina", "saine", "himika", "tokoyo", "oboro",
-                                        "yukihi", "shinra", "hagane", "chikage", "kururu",
-                                        "thallya", "raira"};
+  // ---- ruleset / content modules -------------------------------------------
+  // Preset name. Recognised values (Chinese aliases also accepted):
+  //   kigen-tatsujin  起源战达人 : 01-12, no 异相
+  //   kigen-full      起源战全扩 : + official, no 异相   (recommended eval env)
+  //   gachi-tatsujin  完全战达人 : 01-12 + 异相
+  //   gachi-full      完全战全扩 : all official + 异相
+  // `allowCustom` additionally enables the "custom" pack in any of them.
+  std::string preset = "kigen-full";
+  bool allowCustom = false;
+  std::vector<std::string> allowedPacks;      // explicit override, empty = from preset
+  int variantsOverride = -1;                  // -1 preset, 0 = no 异相, 1 = allow 异相
+  std::string packsFile = "content/packs.json";  // pack -> [module names]
+  std::string comboBansFile = "content/combo_bans.json";  // 禁用组合表
+  std::vector<ComboBan> comboBans;  // applied on top of comboBansFile
+  std::vector<std::string> contentDirs;       // extra dirs, "dir:pack" (pack default custom)
+  std::vector<std::string> enabledGoddesses;  // empty = all allowed by the preset
+  // Draft pool override; empty = derived from the loaded content + ruleset.
+  std::vector<std::string> draftPool;
 };
 
 // A live attack instance (virtual attacks included).
@@ -46,6 +78,8 @@ struct Attack {
   uint32_t keywords = 0;
   bool negateDamage = false;       // 驳论: negate damage but keep附加效果
   bool terminal = false;           // dynamic 终端 (电磁炮 黄)
+  int damageToCard = -1;           // 在此旗: damage crystals go onto this 付与 instead
+  int sourceDefOverride = -1;      // 祟神复制: 女神/通常/切札 判定用的来源 def
   bool counted = false;            // already counted toward 每回合攻击次数
   bool attackerChoosesDamage = false;  // 畏掠
   bool negated = false;       // 打消
@@ -64,7 +98,21 @@ class Engine {
   GameState st;
   std::vector<CardDef> defs;
 
-  void load_content(const std::string& luaFile);
+  void load_content(const std::string& luaFile);  // pack "tatsujin"
+  void load_content(const std::string& luaFile, const std::string& pack);
+  int load_content_dir(const std::string& dir, const std::string& pack);  // *.lua, sorted
+  int load_manifest(const std::string& jsonFile);  // {"pack": ["module", ...]}
+  int load_combo_bans(const std::string& jsonFile);  // [{a,b,card}, ...]
+
+  // ---- content modules / ruleset -------------------------------------------
+  const std::vector<ContentModule>& modules() const { return modules_; }
+  bool pack_allowed(const std::string& pack) const;
+  std::vector<std::string> allowed_packs() const;
+  bool variants_allowed() const;
+  bool goddess_enabled(const std::string& g) const;
+  std::vector<std::string> goddess_pool() const;   // draft candidates, load order
+  std::string ruleset_summary() const;
+
   void set_agent(Player p, Agent* a);
 
   // ---- accessors -----------------------------------------------------------
@@ -115,7 +163,7 @@ class Engine {
   void gain_vigor(Player p, int n);
   void give_cower(Player p);
   void lose_life(Player p, int n, bool triggerBreak = true);
-  void damage_life(Player target, int n, AreaKind to, bool triggerBreak);
+  void damage_life(Player target, int n, AreaKind to, bool triggerBreak, int toCard = -1);
   void deal_damage(Player target, std::optional<int> aura, std::optional<int> life,
                    uint32_t keywords = 0);
   void rebuild(Player p, bool costLife);
@@ -123,6 +171,10 @@ class Engine {
   // Registers an attack with the per-turn counters and fires `attack_declared`.
   // Idempotent for a given Attack, so declare-then-resolve counts it exactly once.
   void declare_attack(Attack& a);
+  // Fire a named event (runs matching card `triggers`; end-phase events are
+  // resolved in an order chosen by the active player).
+  void fire(const char* event, Player subject, Attack* atk = nullptr, int card = -1,
+            bool first = false);
   void play_card(Player p, int inst, bool asResponse, bool zenkai = false);
   void consume_enhance_crystal(int inst);
   void check_win();
@@ -154,6 +206,11 @@ class Engine {
   int last_damage_side() const { return lastDmgSide_; }      // 0 none, 1 aura, 2 life
   int last_damage_amount() const { return lastDmgAmount_; }
   bool last_damage_from_attack() const { return lastDmgFromAttack_; }
+  // The side/amount the attack that just resolved actually dealt (0 = none).
+  // Unlike last_damage_* this is cleared for every attack, so 攻击后 effects do
+  // not read a stale value when the attack dealt no damage (e.g. 驳论).
+  int last_attack_side() const { return lastAtkSide_; }
+  int last_attack_amount() const { return lastAtkAmount_; }
   void store_int(int inst, const std::string& key, int v);   // per-card scratch (神座渡 X)
   int load_int(int inst, const std::string& key, int def = 0) const;
   std::vector<std::string> available_forms(const std::string& goddess) const;
@@ -187,6 +244,14 @@ class Engine {
   void raira_perm_cut(Player p) { ps(p).cutCostPermanent = true; }
   void cover_card(int inst);                          // move a card into its cover pile (face down)
   void cover_deck(Player p);                          // 紧那罗: cover the whole deck
+  void return_enhance(int inst);                      // 冥沼式: 从弃牌堆回到付与区
+  void empty_card(int inst);                          // all crystals -> 虚, then leave play
+  // Where a card's 献 go when they leave it (虚 / 距 / 持有者的装 or 气).
+  void decay_crystals(int inst, int n);
+  void remove_all_normals(Player p);                  // 残响装置: 移除所有非切牌
+  void skip_next_main(Player p) { ps(p).skipMainPhase = true; }
+  void add_temp_distance(Player p, int n) { ps(p).tempDistanceMod += n; }
+  void add_temp_near_distance(Player p, int n) { ps(p).tempNearDistanceMod += n; }
   std::string card_zone(int inst) const;
   void use_from_cover(int inst, bool asResponse);     // 分身/鸢影: use a cover card
   void force_unrespondable() { forceUnrespondable_ = true; }
@@ -257,6 +322,38 @@ class Engine {
   int distance_delta() const;
   // 达人距离 (近身距离): shared threshold, default 2, modified by active cards.
   int near_distance() const;
+  int areas_with(int n) const;   // 区域中恰好有 n 个结晶的个数（新幕来临）
+  // ---- 冻结（15-Konuru）----------------------------------------------------
+  int aura_free(Player p) const;      // 装中剩余空位（樱花结晶 + 冰晶一起占位）
+  bool frozen(Player p) const { return ps(p).ice > 0; }
+  bool armor_full(Player p) const { return aura_free(p) <= 0; }
+  int freeze(Player p, int n, int cause = -1);  // 尝试置入 n 个冰晶，返回实际数量
+  bool has_enemy_no_flare(Player p) const;      // 对手场上有"你不能聚气"的光环
+  int nagi_value(int defId, Player p, int inst);  // 纳（可动态）
+  // 八叶: 镜映 = 你的装/气/命中与对手结晶数相同的区域数。
+  int mirror(Player p) const;
+  // ---- 诅咒（21-Kamuwi）----------------------------------------------------
+  int curse(Player p) const { return ps(p).curse; }
+  void add_curse(Player p, int n);          // 被诅咒 n 次（> 16 即死亡）
+  bool protects_enemy(Player p) const;      // 对手是否有"对手不会死亡"的牌
+  int deny_aura_host(Player p) const;       // 血飞沫: 阻止 p 的装获得结晶的牌
+  bool reverse_moves_active(Player p) const;  // 映界
+  int count_complete(Player p) const;         // 八叶: 完全态的牌数
+  // ---- 回忆区（八叶 AA1）---------------------------------------------------
+  void to_memory(int inst);                   // 扣置入回忆区
+  int memory_size(Player p) const;
+  int memory_draw(Player p, int n);           // 从回忆区取 n 张加入手牌
+  void all_normals_to_memory(Player p, int except = -1);  // 旅途: 全部通常牌扣置入回忆区
+  bool has_memory_draw(Player p) const;
+  bool has_memory_shield(Player p) const;
+  int lose_external(AreaRef a, int n);        // 把结晶移到游戏外
+  bool can_upgrade(int inst) const;   // 完全态: 这张牌有升级版
+  bool upgrade_card(int inst);        // 完全态: 就地升级（保留所在区域）
+  void thaw(Player p, int n) { ps(p).ice = std::max(0, ps(p).ice - n); }
+  int ice_count(Player p) const { return ps(p).ice; }
+  void redirect_damage_to_card(int inst) { pendingDamageToCard_ = inst; }
+  bool has_damage_immunity(Player p) const;
+  int absorb_aura_host(Player p) const;  // 双掌生花: an active card that absorbs 装附
   bool is_poison(int inst) const { return def_of(inst).isPoison; }
   std::vector<int> poison_bag(Player p) const { return ps(p).bag; }
   void place_poison(int inst, Player holder, Zone z);
@@ -292,6 +389,7 @@ class Engine {
   std::vector<int> active_transform_defs(Player p) const;
   bool can_burn(Player p, int x) const;
   bool transform_is(Player p, const std::string& name) const;
+  void set_next_draw_one(Player p) { ps(p).nextDrawOne = true; }  // 夜叉: 对手少抽一张
   void transform_choose(Player p);
   void init_transforms(Player p, const std::string& form);
   std::vector<int> transform_cards(Player p) const;
@@ -319,10 +417,16 @@ class Engine {
   Agent* agents_[2] = {nullptr, nullptr};
   bool mainDirty_ = false;
   bool abortMain_ = false;
+  int pendingDamageToCard_ = -1;  // 在此旗: set on_play, snapshotted by make_attack
+  int damageToCard_ = -1;         // consumed by apply_damage_to
+  int lastAtkSide_ = 0;      // side the last resolved attack dealt (0 = none)
+  int lastAtkAmount_ = 0;
   int lastDmgSide_ = 0;      // 0 none, 1 aura, 2 life
   int lastDmgAmount_ = 0;
   bool lastDmgFromAttack_ = false;
   std::vector<std::string> playerSets_[2];
+  std::vector<ContentModule> modules_;
+  std::vector<std::string> defPack_;  // parallel to defs: the pack each def came from
   std::map<std::pair<int, std::string>, int> vars_;
   bool tracing_ = false;
   nlohmann::json frames_ = nlohmann::json::array();
@@ -355,8 +459,6 @@ class Engine {
   bool forceUnrespondable_ = false;
   int externalAdded_ = 0;
 
-  void fire(const char* event, Player subject, Attack* atk = nullptr, int card = -1,
-            bool first = false);
   void notify_aura_changed(Player p);
 
   // Untrusted-decision handling (see decide()).
@@ -399,6 +501,7 @@ class Engine {
   void apply_damage_to(Player target, std::optional<int> aura, std::optional<int> life,
                        uint32_t keywords, int sourceInst, int chooser = -1,
                        bool fromAttack = false);
+  void fire_armor_full_if_new(Player p, int cause);
   bool ask_yes_no(Player p, const std::string& prompt);
   int ask_one(Player p, Request req);
 };

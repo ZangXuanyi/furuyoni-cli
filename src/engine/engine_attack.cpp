@@ -20,10 +20,17 @@ using namespace detail;  // NOLINT
 
 int Engine::effective_armor(Player p) const {
   int armor = ps(p).aura;
-  for (int inst : ps(p).enhance)
+  bool ice_armor = false;
+  for (int inst : ps(p).enhance) {
     if (def_of(inst).armorFromCrystals) armor += ci(inst).crystals;
-  for (int inst : ps(p).special)
-    if (ci(inst).faceUp && def_of(inst).armorFromCrystals) armor += ci(inst).crystals;
+    if (def_of(inst).iceAsArmor) ice_armor = true;
+  }
+  for (int inst : ps(p).special) {
+    if (!ci(inst).faceUp) continue;
+    if (def_of(inst).armorFromCrystals) armor += ci(inst).crystals;
+    if (def_of(inst).iceAsArmor) ice_armor = true;
+  }
+  if (ice_armor) armor += ps(p).ice;  // 冰凌包覆: 冰晶视作装
   return armor;
 }
 
@@ -65,7 +72,11 @@ void Engine::drop_enhance_if_empty(int inst) {
 
 void Engine::check_win() {
   if (st.over) return;
-  bool dead[2] = {ps(P0).life <= 0, ps(P1).life <= 0};
+  bool dead[2] = {ps(P0).life <= 0 || ps(P0).curse >= 16,
+                  ps(P1).life <= 0 || ps(P1).curse >= 16};
+  // 阡: 本牌弃置前，对手不会死亡。
+  for (int i = 0; i < 2; ++i)
+    if (dead[i] && protects_enemy(static_cast<Player>(i))) dead[i] = false;
   if (!dead[0] && !dead[1]) return;
   for (int i = 0; i < 2; ++i)
     if (dead[i] && try_revive(static_cast<Player>(i))) dead[i] = false;  // 最后的结晶
@@ -124,11 +135,13 @@ bool Engine::try_revive(Player p) {
   return true;
 }
 
-void Engine::damage_life(Player p, int n, AreaKind to, bool triggerBreak) {
+void Engine::damage_life(Player p, int n, AreaKind to, bool triggerBreak, int toCard) {
   // 倒车 routes life damage to 距; rebuild-style life loss goes to 气; a few
   // effects send it to 虚.
   AreaRef dest = AreaRef::flare(p);
-  if (to == AreaKind::Dust)
+  if (toCard >= 0)
+    dest = AreaRef::card(toCard);  // 在此旗
+  else if (to == AreaKind::Dust)
     dest = AreaRef::dust();
   else if (to == AreaKind::Distance)
     dest = AreaRef::distance();
@@ -191,11 +204,8 @@ void Engine::consume_enhance_crystal(int inst) {
   const CardDef& d = def_of(inst);
   Player owner = c.holder;  // the controller, for on_discard / 弃置时
   c.crystals -= 1;
-  // a dropped 献 falls to 虚 by default; e.g. 圈域 sends it to 距 instead.
-  if (d.decayTo == "distance")
-    st.distance += 1;
-  else
-    st.dust += 1;
+  // a dropped 献 falls to 虚 by default; 圈域 sends it to 距 instead.
+  decay_crystals(inst, 1);
   if (c.crystals > 0) return;
   if (d.kind == CardKind::Normal) {
     move_card(inst, Zone::Discard);
@@ -204,6 +214,10 @@ void Engine::consume_enhance_crystal(int inst) {
   } else {
     // 切札付与 also runs its 弃置时 when it leaves play.
     if (effects_->has(d.id, "on_discard")) effects_->call(*this, d.id, "on_discard", owner, inst);
+    if (ci(inst).holder != ci(inst).owner) {  // borrowed: return to its owner
+      move_card(inst, Zone::Limbo);
+      ci(inst).holder = ci(inst).owner;
+    }
     move_card(inst, Zone::Special);  // special enhance stays used in the special zone
   }
 }
@@ -231,7 +245,11 @@ Attack Engine::make_attack(Player p, int inst, bool asResponse, bool consumePend
     forceUnrespondable_ = false;
   }
   effects_->finalize_attack(*this, p, a, consumePending);
-  if (consumePending) declare_attack(a);
+  if (consumePending) {
+    a.damageToCard = pendingDamageToCard_;  // 在此旗
+    declare_attack(a);
+  }
+  pendingDamageToCard_ = -1;
   return a;
 }
 
@@ -251,20 +269,50 @@ void Engine::apply_damage_to(Player target, std::optional<int> aura, std::option
   if (effL && *effL < 0) *effL = 0;
   bool canAura = effA.has_value() && effective_armor(target) >= *effA;
   lastDmgFromAttack_ = fromAttack;
+  if (has_damage_immunity(target)) {  // 夙愿: 你不会受到任何伤害
+    lastDmgSide_ = 0;
+    lastDmgAmount_ = 0;
+    damageToDistance_ = false;
+    return;
+  }
+  // 在此旗: 本应进入气/虚的结晶改为进入该付与牌。作为伤害结算的第一个原子
+  // 操作执行，因此后续的 attack_resolved / on_resolve 触发不会插入其间。
+  const int toCard = damageToCard_;
+  damageToCard_ = -1;
   auto doAura = [&](int n) {
     // Record the chosen side *before* resolving: on_life_loss / 即再起
     // predicates read last_damage_side during the damage.
     lastDmgSide_ = 1;
     lastDmgAmount_ = n;
-    if (damageToDistance_)
+    if (toCard >= 0) {
+      auraDamagedThisTurn_[target] = true;
+      int remaining = n;
+      const std::vector<int> enh = ps(target).enhance;
+      const std::vector<int> sp = ps(target).special;
+      auto drain = [&](int inst) {
+        if (remaining <= 0 || !def_of(inst).armorFromCrystals) return;
+        if (ci(inst).zone == Zone::Special && !ci(inst).faceUp) return;
+        int take = std::min(remaining, ci(inst).crystals);
+        if (take <= 0) return;
+        ci(inst).crystals -= take;
+        add_crystals(AreaRef::card(toCard), take);
+        remaining -= take;
+        drop_enhance_if_empty(inst);
+      };
+      for (int inst : enh) drain(inst);
+      for (int inst : sp) drain(inst);
+      if (remaining > 0)
+        move_crystals(AreaRef::aura(target), AreaRef::card(toCard), remaining, false);
+    } else if (damageToDistance_) {
       move_crystals(AreaRef::aura(target), AreaRef::distance(), n, false);
-    else
+    } else {
       spend_aura(target, n);
+    }
   };
   auto doLife = [&](int n) {
     lastDmgSide_ = 2;  // visible to 即再起 predicates during on_life_loss
     int before = ps(target).life;
-    damage_life(target, n, damageToDistance_ ? AreaKind::Distance : AreaKind::Flare, true);
+    damage_life(target, n, damageToDistance_ ? AreaKind::Distance : AreaKind::Flare, true, toCard);
     lastDmgAmount_ = before - ps(target).life;
   };
 
@@ -305,6 +353,8 @@ void Engine::deal_damage(Player target, std::optional<int> aura, std::optional<i
 
 void Engine::resolve_attack(Attack& a) {
   if (st.over) return;
+  lastAtkSide_ = 0;
+  lastAtkAmount_ = 0;
   if (!a.counted) declare_attack(a);
   attackedThisTurn_[a.attacker] = true;
   fire("attack_counted", a.attacker, &a, -1, attacksThisTurn_[a.attacker] == 2);
@@ -335,6 +385,7 @@ void Engine::resolve_attack(Attack& a) {
     for (int inst : ps(target).hand) consider(inst);
     for (int inst : ps(target).special) {
       if (ci(inst).faceUp) continue;
+      if (def_of(inst).kind != CardKind::Special) continue;  // only 切札 respond from here
       if (ps(target).flare < cut_cost(target, ci(inst).def, inst)) continue;
       consider(inst);
     }
@@ -354,8 +405,23 @@ void Engine::resolve_attack(Attack& a) {
       int idx = ask_one(target, std::move(r));
       if (idx > 0 && idx <= static_cast<int>(resp.size())) {
         int chosen = resp[static_cast<size_t>(idx - 1)];
-        play_card(target, chosen, true);
+        if (a.keywords & AF_PreventResponse) {
+          // 晓: 防止此次对应。对应牌仍要付费用，但效果不发生。
+          const CardDef& rd = def_of(chosen);
+          a.auraDelta -= 1;
+          if (rd.kind == CardKind::Normal) {
+            move_card(chosen, Zone::Discard);  // 用于对应的牌进入弃牌堆
+          } else {
+            a.lifeDelta -= 1;  // 王牌: -1/-1
+            move_crystals(AreaRef::flare(target), AreaRef::dust(), cut_cost(target, rd.id, chosen));
+            move_card(chosen, Zone::Special);
+            ci(chosen).faceUp = true;  // 使用后状态
+          }
+        } else {
+          play_card(target, chosen, true);
+        }
         fire("responded_with", target, nullptr, chosen, false);
+        effects_->run_on_response(*this, &a);  // 旋回刃: 每张对应牌结算完毕后
         if (st.over) {
           currentResponding = prev;
           return;
@@ -369,14 +435,16 @@ void Engine::resolve_attack(Attack& a) {
   if (!(a.keywords & AF_Lock) && !a.range.contains(distance())) a.missed = true;
   bool negated = a.negated && !(a.keywords & AF_NoNegate);
   if (negated || a.missed) {
-    // 落空/被打消同样是一次"结算完毕"（圆环轮回旋等）。
+    // 落空/被打消同样是一次"结算完毕"（圆环轮回轮回旋等）。
     fire("attack_resolved", a.attacker, &a, -1, false);
+    effects_->clear_attack_callbacks(&a);
     return;
   }
   if (a.negateDamage) {  // 驳论: negate only the damage, keep附加效果
     a.hit = true;
     fire("attack_resolved", a.attacker, &a, -1, false);
     effects_->run_after_attack(*this, &a);
+    effects_->clear_attack_callbacks(&a);
     return;
   }
 
@@ -386,11 +454,15 @@ void Engine::resolve_attack(Attack& a) {
   if (effA) *effA += a.auraDelta;
   if (effL) *effL += a.lifeDelta;
   damageToDistance_ = (a.keywords & AF_ToDistance) != 0;
+  damageToCard_ = a.damageToCard;
   apply_damage_to(target, effA, effL, a.keywords, a.sourceInst,
                   a.attackerChoosesDamage ? a.attacker : -1, true);
+  lastAtkSide_ = lastDmgSide_;
+  lastAtkAmount_ = lastDmgAmount_;
   a.hit = true;
   fire("attack_resolved", a.attacker, &a, -1, false);  // 圆环轮回旋
   effects_->run_after_attack(*this, &a);
+  effects_->clear_attack_callbacks(&a);
 }
 
 // ---------------------------------------------------------------------------
@@ -405,13 +477,49 @@ void Engine::play_card(Player p, int inst, bool asResponse, bool zenkai) {
   StackGuard stackGuard{callStack_};
   ps(p).cardsPlayedThisTurn += 1;
 
+  // 尸: 本回合对手的下一次攻击必须额外弃置一张该女神的牌作为费用。
+  if (d.type == CardType::Attack && !ps(p).extraAttackCostGoddess.empty()) {
+    const std::string g = ps(p).extraAttackCostGoddess;
+    std::vector<int> cands;
+    for (int h : ps(p).hand)
+      if (h != inst && def_of(h).goddess == g) cands.push_back(h);
+    for (int h : ps(p).special)
+      if (!ci(h).faceUp && def_of(h).goddess == g) cands.push_back(h);
+    if (!cands.empty()) {
+      Request r;
+      r.kind = "cards";
+      r.prompt = "尸：额外弃置一张" + g + "的牌作为费用";
+      r.minSel = 1;
+      r.maxSel = 1;
+      for (int h : cands) {
+        Option o;
+        o.label = card_label(def_of(h));
+        o.data = card_json(def_of(h));
+        o.data["inst"] = h;
+        r.options.push_back(o);
+      }
+      int pick = ask_one(p, std::move(r));
+      if (pick >= 0 && pick < static_cast<int>(cands.size())) {
+        int h = cands[static_cast<size_t>(pick)];
+        if (ci(h).zone == Zone::Hand)
+          move_card(h, Zone::Discard);
+        else {
+          move_card(h, Zone::Discard);  // 切札: 直接进弃牌堆
+        }
+      }
+    }
+    ps(p).extraAttackCostGoddess.clear();
+  }
+
   if (d.kind == CardKind::Special) {
     move_crystals(AreaRef::flare(p), AreaRef::dust(), cut_cost(p, defId, inst));
     ci(inst).faceUp = true;  // used / 展开
     ci(inst).usedThisTurn = true;
   } else {
-    auto& h = ps(p).hand;
-    h.erase(std::remove(h.begin(), h.end(), inst), h.end());
+    // Remove it from whichever zone list currently holds it (normal EX cards can
+    // sit outside the hand), then park it in Limbo while it resolves.
+    if (auto* v = zone_ptr(st, ci(inst).holder, ci(inst).zone))
+      v->erase(std::remove(v->begin(), v->end(), inst), v->end());
     ci(inst).zone = Zone::Limbo;
   }
 
@@ -447,6 +555,7 @@ void Engine::resolve_card_effect(Player p, int inst, bool asResponse, bool zenka
       if (ps(p).wind < 20) ps(p).wind += 1;
     }
   }
+  ps(p).cardsPlayedTotal += 1;  // 万叶仍未识: 本局打出的牌数
   if (d.centrifugal) playedCentrifugalThisTurn_[p] = true;
   if (d.name == cards::kRenseiKougeki) playedLianchengThisTurn_[p] = true;
   bool prevZenkai = zenkaiActive_;
@@ -461,16 +570,20 @@ void Engine::resolve_card_effect(Player p, int inst, bool asResponse, bool zenka
     if (ci(inst).crystals > 0) {
       int old = ci(inst).crystals;
       ci(inst).crystals = 0;
-      if (d.decayTo == "distance")
-        st.distance += old;
-      else
-        st.dust += old;
+      decay_crystals(inst, old);
     }
     // Order per the rules: 展开时 first, then place 献, then discard if empty.
     if (effects_->has(defId, "on_enter")) effects_->call(*this, defId, "on_enter", p, inst);
     int take = 0;
     int total = st.dust + ps(p).aura;
-    int nagiVal = d.nagi + pendingNagiAdjust_;
+    // 虚伪: the opponent's newly expanded 付与 has 纳 -1 while it is expanded.
+    int enemyNagiMod = 0;
+    if (d.nagi >= 0) {
+      for (int oi : ps(opp(p)).enhance) enemyNagiMod += def_of(oi).enemyNagiMod;
+      for (int oi : ps(opp(p)).special)
+        if (ci(oi).faceUp) enemyNagiMod += def_of(oi).enemyNagiMod;
+    }
+    int nagiVal = nagi_value(d.id, p, inst) + pendingNagiAdjust_ + enemyNagiMod;
     pendingNagiAdjust_ = 0;
     if (nagiVal < 0) nagiVal = 0;
     if (total > 0 && nagiVal > 0) {
@@ -499,6 +612,9 @@ void Engine::resolve_card_effect(Player p, int inst, bool asResponse, bool zenka
     else
       move_card(inst, Zone::Special);
     ci(inst).crystals += take;  // on_enter may have added crystals (e.g. 反射装置)
+    // 献 placed: cards that react to the final 献 count (寄花: 展开时移 X 个到虚).
+    if (effects_->has(defId, "on_expanded"))
+      effects_->call(*this, defId, "on_expanded", p, inst);
     if (ci(inst).crystals <= 0) {
       ci(inst).crystals = 0;
       if (d.kind == CardKind::Normal) {
@@ -587,7 +703,11 @@ void Engine::use_foreign_card(Player user, int inst) {
   callStack_.push_back({defId, user, false});
   StackGuard stackGuard{callStack_};
   resolve_card_effect(user, inst, false);
-  if (ci(inst).zone == Zone::Limbo) move_card(inst, Zone::Discard);  // owner's discard
+  if (ci(inst).zone == Zone::Limbo) {
+    // 切牌永远不会进入弃牌堆: a borrowed 切札 returns to a special zone (used),
+    // everything else goes to its owner's discard pile.
+    move_card(inst, def_of(inst).kind == CardKind::Special ? Zone::Special : Zone::Discard);
+  }
 }
 
 void Engine::reuse_special(int inst) { resolve_card_effect(ci(inst).owner, inst, false); }

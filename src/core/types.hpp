@@ -14,7 +14,8 @@ enum Player : int { P0 = 0, P1 = 1 };
 inline Player opp(Player p) { return p == P0 ? P1 : P0; }
 
 // Limbo == a card currently resolving, not yet in any real zone.
-enum class Zone { Deck, Hand, Discard, Cover, Enhance, Special, Parts, Sealed, Bag, Removed, Limbo };
+enum class Zone { Deck, Hand, Discard, Cover, Enhance, Special, Parts, Sealed, Bag, Removed, Limbo,
+                  Memory };  // Memory = 回忆区（八叶，扣置且对对手保密）
 
 enum class CardKind { Normal, Special };  // Special == 切札
 enum class CardType { Attack, Action, Enhance };
@@ -40,6 +41,7 @@ enum AttackFlag : uint32_t {
   AF_NoActionResponse = 1u << 8,    // "行动牌不可对"
   AF_NoNegate = 1u << 9,            // "不可打消"：可被对应但不会被 打消
   AF_ToDistance = 1u << 10,         // 倒车：本应进入气/虚的伤害结晶改为进入距
+  AF_PreventResponse = 1u << 11,    // 晓：防止此次对应（对应牌照付费用但无效）
 };
 
 // 机巧 colors (攻击=红, 行动=蓝, 付与=绿, 对应=紫, 全力=黄).

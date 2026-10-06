@@ -38,7 +38,10 @@ return {
         ctx:cover_top(ctx:opp())
         ctx:cover_top(ctx:opp())
       else
-        local pile = ctx:discard_pile(ctx:opp())
+        local pile = {}
+        for _, i in ipairs(ctx:discard_pile(ctx:opp())) do
+          if ctx:opponent_pickable(i) then pile[#pile + 1] = i end
+        end
         if #pile > 0 then
           local sel = ctx:choose_cards("诡辩：从对手弃牌选一张使用", pile, 1, 1)
           for _, i in ipairs(sel) do ctx:use_foreign_card(i) end
@@ -55,7 +58,7 @@ return {
       local opp = ctx:opp()
       local pool = {}
       for _, i in ipairs(ctx:hand(opp)) do
-        if ctx:is_attack(i) then pool[#pool + 1] = i end
+        if ctx:is_attack(i) and ctx:opponent_pickable(i) then pool[#pool + 1] = i end
       end
       if #pool == 0 then return end
       local sel = ctx:choose_cards("引用：选择对手一张攻击牌", pool, 1, 1)
@@ -111,7 +114,10 @@ return {
   { set = "shinra", form = "O", num = 7, name = "论破", kind = "normal", type = "enhance",
     nagi = 4,
     on_enter = function(ctx)
-      local pile = ctx:discard_pile(ctx:opp())
+      local pile = {}
+      for _, i in ipairs(ctx:discard_pile(ctx:opp())) do
+        if ctx:opponent_pickable(i) then pile[#pile + 1] = i end
+      end
       if #pile == 0 then return end
       local sel = ctx:choose_cards("论破：从对手弃牌封印一张", pile, 1, 1)
       for _, i in ipairs(sel) do ctx:seal_card(ctx:source_inst(), i) end
@@ -123,7 +129,7 @@ return {
     on_play = function(ctx)
       local pool = {}
       for _, i in ipairs(ctx:discard_pile(ctx:opp())) do
-        if ctx:is_normal_card(i) then pool[#pool + 1] = i end
+        if ctx:is_normal_card(i) and ctx:opponent_pickable(i) then pool[#pool + 1] = i end
       end
       if #pool == 0 then return end
       local sel = ctx:choose_cards("完全论破：封印对手弃牌一张常规牌", pool, 1, 1)

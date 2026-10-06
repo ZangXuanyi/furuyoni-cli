@@ -26,6 +26,7 @@ uint32_t kwflag(const std::string& s) {
   if (s == "no_action_response" || s == "行动牌不可对") return AF_NoActionResponse;
   if (s == "no_negate" || s == "不可打消") return AF_NoNegate;
   if (s == "to_distance" || s == "到距") return AF_ToDistance;
+  if (s == "prevent_response" || s == "防止对应") return AF_PreventResponse;
   return 0;
 }
 
@@ -231,6 +232,11 @@ struct EffectHost::Impl {
   };
   std::vector<PendingMod> pending;
   std::map<Attack*, std::vector<std::pair<Player, sol::function>>> afterAttack;
+  // ctx:on_response callbacks, keyed by the attack being responded to.
+  std::map<Attack*, std::vector<std::pair<Player, sol::function>>> onResponse;
+  std::vector<std::pair<Player, sol::function>> pendingOnResponse;
+  // ctx:attack{after=...} 的攻击后闭包，按攻击对象索引（祟神复制要用）。
+  std::map<Attack*, sol::function> attackAfterSpec;
 };
 
 EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
@@ -252,6 +258,27 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   atkutil["extend_far"] = [](LuaAttack& h, int n) { h.a->range.extend_far(n); };
   atkutil["extend_near"] = [](LuaAttack& h, int n) { h.a->range.extend_near(n); };
   atkutil["shrink_far"] = [](LuaAttack& h, int n) { h.a->range.shrink_far(n); };
+  atkutil["shrink_near"] = [](LuaAttack& h, int n) { h.a->range.shrink_near(n); };
+  atkutil["near"] = [](LuaAttack& h) {
+    int n = 999;
+    for (auto& sp : h.a->range.spans) n = std::min(n, sp.first);
+    return n == 999 ? -1 : n;
+  };
+  atkutil["far"] = [](LuaAttack& h) {
+    int n = -1;
+    for (auto& sp : h.a->range.spans) n = std::max(n, sp.second);
+    return n;
+  };
+  atkutil["source_full_power"] = [](LuaAttack& h) -> bool {
+    if (h.a->sourceDefOverride >= 0 && h.e)
+      return (h.e->def(h.a->sourceDefOverride).flags & CF_FullPower) != 0;
+    if (h.a->sourceInst < 0 || !h.e) return false;
+    return (h.e->def_of(h.a->sourceInst).flags & CF_FullPower) != 0;
+  };
+  atkutil["has_keyword"] = [](LuaAttack& h, std::string k) {
+    uint32_t f = kwflag(k);
+    return f != 0 && (h.a->keywords & f) != 0;
+  };
   atkutil["aura_damage"] = [](LuaAttack& h, sol::this_state ts) -> sol::object {
     if (!h.a->aura) return sol::make_object(ts.L, sol::nil);
     return sol::make_object(ts.L, *h.a->aura + h.a->auraDelta);
@@ -261,24 +288,39 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     return sol::make_object(ts.L, *h.a->life + h.a->lifeDelta);
   };
   atkutil["source_inst"] = [](LuaAttack& h) { return h.a->sourceInst; };
-  atkutil["from_normal"] = [](LuaAttack& h) -> bool {
-    if (h.a->sourceInst < 0 || !h.e) return false;
-    return h.e->def_of(h.a->sourceInst).kind == CardKind::Normal;
+  // 祟神复制品: sourceDefOverride 优先（复制品不持有实例，但"女神/通常/切札"要照抄来源）。
+  auto src_def = [](LuaAttack& h) -> int {
+    if (h.a->sourceDefOverride >= 0) return h.a->sourceDefOverride;
+    return h.a->sourceInst;
   };
-  atkutil["from_special"] = [](LuaAttack& h) -> bool {
-    if (h.a->sourceInst < 0) return h.a->fromSpecial;
-    return h.e->def_of(h.a->sourceInst).kind == CardKind::Special;
+  atkutil["from_normal"] = [src_def](LuaAttack& h) -> bool {
+    if (!h.e) return false;
+    int d = src_def(h);
+    if (d < 0) return false;
+    return (h.a->sourceDefOverride >= 0 ? h.e->def(d) : h.e->def_of(d)).kind == CardKind::Normal;
   };
-  atkutil["source_goddess"] = [](LuaAttack& h) -> std::string {
-    if (h.a->sourceInst < 0 || !h.e) return std::string();
-    return h.e->def_of(h.a->sourceInst).goddess;
+  atkutil["from_special"] = [src_def](LuaAttack& h) -> bool {
+    int d = src_def(h);
+    if (d < 0) return h.a->fromSpecial;
+    if (!h.e) return false;
+    return (h.a->sourceDefOverride >= 0 ? h.e->def(d) : h.e->def_of(d)).kind == CardKind::Special;
   };
-  atkutil["source_set"] = [](LuaAttack& h) -> std::string {
-    if (h.a->sourceInst < 0 || !h.e) return std::string();
-    return h.e->def_of(h.a->sourceInst).set;
+  atkutil["source_goddess"] = [src_def](LuaAttack& h) -> std::string {
+    if (!h.e) return std::string();
+    int d = src_def(h);
+    if (d < 0) return std::string();
+    return (h.a->sourceDefOverride >= 0 ? h.e->def(d) : h.e->def_of(d)).goddess;
+  };
+  atkutil["source_set"] = [src_def](LuaAttack& h) -> std::string {
+    if (!h.e) return std::string();
+    int d = src_def(h);
+    if (d < 0) return std::string();
+    return (h.a->sourceDefOverride >= 0 ? h.e->def(d) : h.e->def_of(d)).set;
   };
   atkutil["source_is_goddess"] = [](LuaAttack& h, std::string g) -> bool {
-    if (h.a->sourceInst < 0 || !h.e) return false;
+    if (!h.e) return false;
+    if (h.a->sourceDefOverride >= 0) return h.e->def(h.a->sourceDefOverride).goddess == g;
+    if (h.a->sourceInst < 0) return false;
     return h.e->card_has_goddess(h.a->sourceInst, g);
   };
   atkutil["negate_damage"] = [](LuaAttack& h) { h.a->negateDamage = true; };
@@ -315,6 +357,7 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
 
   ctx["hand"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).hand; };
   ctx["discard_pile"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).discard; };
+  ctx["cover_pile"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).cover; };
   ctx["to_deck_top"] = [](LuaCtx& c, int inst) { c.e->move_card_top(inst); };
   ctx["to_deck_bottom"] = [](LuaCtx& c, int inst) { c.e->move_card_bottom(inst); };
   ctx["discard_card"] = [](LuaCtx& c, int inst) { c.e->move_card(inst, Zone::Discard); };
@@ -324,11 +367,12 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
                    sol::optional<int> pt) -> int {
     Player pFrom = pf ? static_cast<Player>(*pf) : c.who;
     Player pTo = pt ? static_cast<Player>(*pt) : pFrom;
-    // 虚鱼: crystal-move effects of cards played from the cover may be reversed.
-    if (c.e->current_from_cover() && c.e->has_named_active(c.who, cards::kXuYu)) {
+    // 虚鱼 (cards played from the cover) / 映界 (all of your crystal moves).
+    if ((c.e->current_from_cover() && c.e->has_named_active(c.who, cards::kXuYu)) ||
+        c.e->reverse_moves_active(c.who)) {
       Request r;
       r.kind = "option";
-      r.prompt = "虚鱼：反向移动？";
+      r.prompt = c.e->reverse_moves_active(c.who) ? "映界：反向移动？" : "虚鱼：反向移动？";
       r.options.push_back({from + " -> " + to, true, {}});
       r.options.push_back({to + " -> " + from, true, {}});
       r.minSel = 1;
@@ -394,6 +438,155 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
                                                 int mn, int mx) {
     return choose_cards_impl(*c.e, static_cast<Player>(p), prompt, insts, mn, mx);
   };
+  // Ask *another* player to pick one / several options (收割, 重压, 魔食, 万象乖离残灭之影 …).
+  auto choose_opts_impl = [](Engine& e, Player who, const std::string& prompt, sol::table opts,
+                             int mn, int mx) {
+    Request r;
+    r.kind = "option";
+    r.prompt = prompt;
+    for (size_t i = 1;; ++i) {
+      sol::object o = opts[i];
+      if (!o.valid() || o == sol::nil) break;
+      Option op;
+      op.label = o.is<std::string>() ? o.as<std::string>() : std::string("?");
+      r.options.push_back(op);
+    }
+    r.minSel = mn;
+    r.maxSel = mx;
+    if (r.options.empty()) return std::vector<int>{};
+    Decision d = e.decide(who, std::move(r));
+    std::vector<int> out;
+    for (int i : d.indices)
+      if (i >= 0 && i < static_cast<int>(r.options.size())) out.push_back(i);
+    return out;
+  };
+  ctx["choose_for"] = [choose_opts_impl](LuaCtx& c, int p, std::string prompt, sol::table opts) {
+    auto v = choose_opts_impl(*c.e, static_cast<Player>(p), prompt, opts, 1, 1);
+    return v.empty() ? -1 : v[0];
+  };
+  ctx["choose_options_for"] = [choose_opts_impl](LuaCtx& c, int p, std::string prompt,
+                                                 sol::table opts, int mn, int mx) {
+    return choose_opts_impl(*c.e, static_cast<Player>(p), prompt, opts, mn, mx);
+  };
+  ctx["areas_with"] = [](LuaCtx& c, int n) { return c.e->areas_with(n); };
+  ctx["redirect_damage_to_card"] = [](LuaCtx& c, int inst) {
+    c.e->redirect_damage_to_card(inst);
+  };
+  ctx["freeze"] = [](LuaCtx& c, int p, int n, sol::optional<int> cause) {
+    return c.e->freeze(static_cast<Player>(p), n, cause ? *cause : -1);
+  };
+  ctx["thaw"] = [](LuaCtx& c, int p, int n) { c.e->thaw(static_cast<Player>(p), n); };
+  ctx["ice"] = [](LuaCtx& c, int p) { return c.e->ice_count(static_cast<Player>(p)); };
+  ctx["frozen"] = [](LuaCtx& c, int p) { return c.e->frozen(static_cast<Player>(p)); };
+  ctx["armor_full"] = [](LuaCtx& c, int p) { return c.e->armor_full(static_cast<Player>(p)); };
+  ctx["aura_free"] = [](LuaCtx& c, int p) { return c.e->aura_free(static_cast<Player>(p)); };
+  // 八叶: 镜映 = 你的装/气/命中与对手对应区域结晶数相同的区域数
+  ctx["mirror"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->mirror(p ? static_cast<Player>(*p) : c.who);
+  };
+  // 八叶: 完全态（把一张牌就地升级为它的升级版）
+  ctx["can_upgrade"] = [](LuaCtx& c, int inst) { return c.e->can_upgrade(inst); };
+  ctx["upgrade_card"] = [](LuaCtx& c, int inst) { return c.e->upgrade_card(inst); };
+  ctx["turn_number"] = [](LuaCtx& c) { return c.e->st.turn; };
+  ctx["curse"] = [](LuaCtx& c, int p) { return c.e->curse(static_cast<Player>(p)); };
+  ctx["add_curse"] = [](LuaCtx& c, int p, int n) {
+    c.e->add_curse(static_cast<Player>(p), n);
+  };
+  ctx["set_extra_attack_cost"] = [](LuaCtx& c, int p, std::string goddess) {
+    c.e->ps(static_cast<Player>(p)).extraAttackCostGoddess = goddess;
+  };
+  ctx["memory_size"] = [](LuaCtx& c, int p) {
+    return c.e->memory_size(static_cast<Player>(p));
+  };
+  ctx["memory_of"] = [](LuaCtx& c, int p, sol::this_state ts) -> sol::object {
+    std::vector<int> v = c.e->ps(static_cast<Player>(p)).memory;
+    sol::table t = sol::table::create(ts.L);
+    for (size_t i = 0; i < v.size(); ++i) t[i + 1] = v[i];
+    return sol::make_object(ts.L, t);
+  };
+  ctx["to_memory"] = [](LuaCtx& c, int inst) { c.e->to_memory(inst); };
+  ctx["all_normals_to_memory"] = [](LuaCtx& c, int p, sol::optional<int> except) {
+    c.e->all_normals_to_memory(static_cast<Player>(p), except ? *except : -1);
+  };
+  ctx["memory_draw"] = [](LuaCtx& c, int p, int n) {
+    return c.e->memory_draw(static_cast<Player>(p), n);
+  };
+  ctx["cards_played_total"] = [](LuaCtx& c, int p) {
+    return c.e->ps(static_cast<Player>(p)).cardsPlayedTotal;
+  };
+  ctx["external_to_card"] = [](LuaCtx& c, int inst, int n) {
+    return c.e->gain_external(AreaRef::card(inst), n);
+  };
+  ctx["count_complete"] = [](LuaCtx& c, int p) {
+    return c.e->count_complete(static_cast<Player>(p));
+  };
+  // 把结晶移到游戏外（生命/装/气/距/虚）。
+  ctx["to_external"] = [](LuaCtx& c, int p, std::string area, int n) {
+    return c.e->lose_external(area_of(area, static_cast<Player>(p)), n);
+  };
+  ctx["damage_immune"] = [](LuaCtx& c, int p) {
+    return c.e->has_damage_immunity(static_cast<Player>(p));
+  };
+  ctx["empty_card"] = [](LuaCtx& c, int inst) { c.e->empty_card(inst); };
+  ctx["remove_all_normals"] = [](LuaCtx& c, int p) {
+    c.e->remove_all_normals(static_cast<Player>(p));
+  };
+  ctx["skip_next_main"] = [](LuaCtx& c, int p) {
+    c.e->skip_next_main(static_cast<Player>(p));
+  };
+  ctx["set_aura_redirect_suppressed"] = [](LuaCtx& c, bool v) {
+    c.e->ps(c.who).suppressAuraRedirect = v;
+  };
+  ctx["add_temp_distance"] = [](LuaCtx& c, int p, int n) {
+    c.e->add_temp_distance(static_cast<Player>(p), n);
+  };
+  ctx["add_temp_near_distance"] = [](LuaCtx& c, int p, int n) {
+    c.e->add_temp_near_distance(static_cast<Player>(p), n);
+  };
+  // 祟神: 生成一张被对应攻击的**精确复制**（修正后的距离/伤害/超克/攻击后效果/女神）。
+  ctx["copy_attack"] = [this](LuaCtx& c, LuaAttack& src) -> bool {
+    Attack* s = src.a;
+    if (!s || !c.e) return false;
+    if (!c.e->can_attack(c.who)) return false;
+    const int srcInst = s->sourceInst;
+    const int srcDef = s->sourceDefOverride >= 0
+                           ? s->sourceDefOverride
+                           : (srcInst >= 0 ? c.e->ci(srcInst).def : -1);
+    sol::function afterSpec;
+    bool hasAfterSpec = false;
+    auto it = impl_->attackAfterSpec.find(s);
+    if (it != impl_->attackAfterSpec.end()) {
+      afterSpec = it->second;
+      hasAfterSpec = true;
+    }
+    Attack a;
+    a.attacker = c.who;
+    a.sourceInst = srcInst;  // 复制品照抄来源牌（女神/通常/切札 判定）
+    a.sourceDefOverride = srcDef;
+    a.range = s->range;
+    a.aura = s->aura;
+    a.life = s->life;
+    a.auraDelta = s->auraDelta;
+    a.lifeDelta = s->lifeDelta;
+    a.keywords = s->keywords;
+    a.attackerChoosesDamage = s->attackerChoosesDamage;
+    a.terminal = s->terminal;
+    finalize_attack(*c.e, c.who, a, true);
+    c.e->declare_attack(a);
+    c.e->resolve_attack(a);
+    if (a.hit) {  // 攻击后效果同样复制
+      if (hasAfterSpec) {
+        LuaCtx c2{c.e, c.who, srcInst};
+        LuaAttack ha{&a, c.e};
+        auto res = afterSpec(c2, ha);
+        if (!res.valid())
+          impl_->fail(std::string("copy_attack after: ") + sol::error(res).what());
+      } else if (srcDef >= 0 && has(srcDef, "on_attack_after")) {
+        call(*c.e, srcDef, "on_attack_after", c.who, srcInst);
+      }
+    }
+    return a.hit;
+  };
   ctx["attack"] = [this](LuaCtx& c, sol::table spec) {
     // 二重奏·弹奏冰瞑 blocks every attack; 迟缓毒 only forbids *using* attack cards,
     // so a card-generated attack still resolves.
@@ -411,9 +604,10 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     a.attackerChoosesDamage = ea.attackerChooses;
     a.terminal = ea.terminal;
     finalize_attack(*c.e, c.who, a, true);
+    sol::object after = spec["after"];
+    if (after.is<sol::function>()) impl_->attackAfterSpec[&a] = after.as<sol::function>();
     c.e->declare_attack(a);  // virtual attacks are attacks too
     c.e->resolve_attack(a);
-    sol::object after = spec["after"];
     if (after.is<sol::function>() && a.hit) {
       LuaCtx c2{c.e, c.who, c.source};
       LuaAttack ha{&a, c.e};
@@ -421,6 +615,7 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
       if (!res.valid())
         impl_->fail(std::string("attack after: ") + sol::error(res).what());
     }
+    impl_->attackAfterSpec.erase(&a);
   };
   ctx["deal_damage"] = [](LuaCtx& c, int target, sol::object aura, sol::object life) {
     c.e->deal_damage(static_cast<Player>(target), read_int(aura, *c.e, c), read_int(life, *c.e, c), 0);
@@ -490,6 +685,8 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["last_damage_side"] = [](LuaCtx& c) { return c.e->last_damage_side(); };
   ctx["last_damage_amount"] = [](LuaCtx& c) { return c.e->last_damage_amount(); };
   ctx["last_damage_from_attack"] = [](LuaCtx& c) { return c.e->last_damage_from_attack(); };
+  ctx["last_attack_side"] = [](LuaCtx& c) { return c.e->last_attack_side(); };
+  ctx["last_attack_amount"] = [](LuaCtx& c) { return c.e->last_attack_amount(); };
   ctx["used_special_count"] = [](LuaCtx& c, int p, std::string g) {
     return c.e->used_special_count(static_cast<Player>(p), g);
   };
@@ -519,6 +716,7 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["gain_extra"] = [](LuaCtx& c, std::string name) { return c.e->gain_extra(c.who, name); };
   ctx["cover_card"] = [](LuaCtx& c, int inst) { c.e->cover_card(inst); };
   ctx["cover_deck"] = [](LuaCtx& c, int p) { c.e->cover_deck(static_cast<Player>(p)); };
+  ctx["return_enhance"] = [](LuaCtx& c, int inst) { c.e->return_enhance(inst); };
   ctx["can_attack"] = [](LuaCtx& c, int p) { return c.e->can_attack(static_cast<Player>(p)); };
   ctx["attack_card_forbidden"] = [](LuaCtx& c, int p) {
     return c.e->attack_card_forbidden(static_cast<Player>(p));
@@ -545,10 +743,18 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     return c.e->cards_played_this_turn(static_cast<Player>(p));
   };
   ctx["dust_to_card"] = [](LuaCtx& c, int inst, int n) { return c.e->dust_to_card(inst, n); };
-  ctx["move_to_card"] = [](LuaCtx& c, std::string from, int inst, int n) {
-    return c.e->move_crystals(area_of(from, c.who), AreaRef::card(inst), n, true);
+  ctx["move_to_card"] = [](LuaCtx& c, std::string from, int inst, int n, sol::optional<int> pf) {
+    Player p = pf ? static_cast<Player>(*pf) : c.who;
+    return c.e->move_crystals(area_of(from, p), AreaRef::card(inst), n, true);
+  };
+  ctx["move_from_card"] = [](LuaCtx& c, int inst, std::string to, int n, sol::optional<int> pt) {
+    Player p = pt ? static_cast<Player>(*pt) : c.who;
+    return c.e->move_crystals(AreaRef::card(inst), area_of(to, p), n, true);
   };
   ctx["set_used"] = [](LuaCtx& c, int inst) { c.e->set_used(inst); };
+  ctx["opponent_pickable"] = [](LuaCtx& c, int inst) {
+    return !c.e->def_of(inst).noOpponentPick;
+  };
   ctx["use_card"] = [](LuaCtx& c, int inst, sol::optional<bool> r) {
     c.e->use_card(inst, r ? *r : false);
   };
@@ -701,6 +907,9 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["transform_cards"] = [](LuaCtx& c, int p) {
     return c.e->transform_cards(static_cast<Player>(p));
   };
+  ctx["set_next_draw_one"] = [](LuaCtx& c, int p) {
+    c.e->set_next_draw_one(static_cast<Player>(p));
+  };
   ctx["current_transform"] = [](LuaCtx& c, int p, sol::this_state ts) -> sol::object {
     Player pl = static_cast<Player>(p);
     int td = c.e->ps(pl).transformDef;
@@ -764,6 +973,13 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["store_int"] = [](LuaCtx& c, std::string k, int v) { c.e->store_int(c.source, k, v); };
   ctx["load_int"] = [](LuaCtx& c, std::string k, sol::optional<int> d) {
     return c.e->load_int(c.source, k, d ? *d : 0);
+  };
+  ctx["on_response"] = [this](LuaCtx& c, sol::function f) {
+    // Registered from on_play (before the Attack exists) or from a response.
+    if (c.e->currentResponding)
+      impl_->onResponse[c.e->currentResponding].push_back({c.who, f});
+    else
+      impl_->pendingOnResponse.push_back({c.who, f});
   };
   ctx["on_resolve"] = [this](LuaCtx& c, sol::function f) {
     if (c.e->currentResponding) impl_->afterAttack[c.e->currentResponding].push_back({c.who, f});
@@ -853,6 +1069,33 @@ void EffectHost::load_file(const std::string& path, std::vector<CardDef>& defs) 
     d.playableFromCover = t.get_or("from_cover", false);
     d.burnRequire = t.get_or("burn_require", 0);
     d.isTransform = t.get_or("transform", false);
+    d.unsealable = t.get_or("unsealable", false);
+    d.noOpponentPick = t.get_or("no_opponent_pick", false);
+    d.enemyNagiMod = t.get_or("enemy_nagi_mod", 0);
+    d.damageImmune = t.get_or("damage_immune", false);
+    d.decayToOwnerAura = t.get_or("decay_to_owner_aura", false);
+    d.absorbAuraBasic = t.get_or("absorb_aura_basic", false);
+    d.keepCrystalsOnReset = t.get_or("keep_crystals_on_reset", false);
+    d.iceAsArmor = t.get_or("ice_as_armor", false);
+    d.maySkipCrystalLoss = t.get_or("may_skip_crystal_loss", false);
+    d.enemyNoFlare = t.get_or("enemy_no_flare", false);
+    d.soloSpecials = t.get_or("solo_specials", false);
+    d.upgrade = t.get_or("upgrade", std::string());
+    d.reverseMoves = t.get_or("reverse_moves", false);
+    d.complete = t.get_or("complete", false);
+    d.limitDistance = t.get_or("limit_distance", false);
+    d.responseOnly = t.get_or("response_only", false);
+    d.denyEnemyAura = t.get_or("deny_enemy_aura", false);
+    d.protectsEnemy = t.get_or("protects_enemy", false);
+    d.memoryDraw = t.get_or("memory_draw", false);
+    d.memoryRebuildShield = t.get_or("memory_rebuild_shield", false);
+    {
+      sol::object ng = t["nagi"];
+      if (ng.is<sol::function>()) {
+        d.nagi = 0;
+        d.dynamicNagi = true;
+      }
+    }
     d.distanceMod = t.get_or("distance_mod", 0);
     d.nearDistanceMod = t.get_or("near_distance_mod", 0);
     d.copies = t.get_or("copies", 1);
@@ -905,16 +1148,9 @@ void EffectHost::load_file(const std::string& path, std::vector<CardDef>& defs) 
 }
 
 bool EffectHost::has(int defId, const char* hook) const {
-  if (defId < 0 || defId >= static_cast<int>(impl_->hooks.size())) return false;
-  const auto& h = impl_->hooks[static_cast<size_t>(defId)];
-  auto ok = [](const sol::object& o) { return o.valid() && o.get_type() != sol::type::nil; };
-  std::string hh(hook);
-  if (hh == "on_play") return ok(h.on_play);
-  if (hh == "on_enter") return ok(h.on_enter);
-  if (hh == "on_discard") return ok(h.on_discard);
-  if (hh == "on_attack_after") return ok(h.on_attack_after);
-  if (hh == "on_use_after") return ok(h.on_use_after);
-  return false;
+  // Any Lua hook the content defines (on_play / on_enter / on_discard /
+  // on_attack_after / on_use_after / on_transform / extra_basic / ...).
+  return has_hook(defId, hook);
 }
 
 bool EffectHost::has_hook(int defId, const char* hook) const {
@@ -1001,6 +1237,10 @@ void EffectHost::finalize_attack(Engine& e, Player attacker, Attack& a, bool con
   };
   // 1) replacements (数值替换) first.
   run_continuous_pass(0);
+  if (consumePending && !impl_->pendingOnResponse.empty()) {
+    for (auto& p : impl_->pendingOnResponse) impl_->onResponse[&a].push_back(p);
+    impl_->pendingOnResponse.clear();
+  }
 
   // 2) Pending "next attack" modifiers owned by the attacker.
   std::vector<size_t> remove;
@@ -1069,6 +1309,16 @@ int EffectHost::eval_continuous_cost(Engine& e, Player owner, int inst, int cost
   return result;
 }
 
+int EffectHost::eval_nagi(Engine& e, int defId, Player who, int inst) {
+  const auto& h = impl_->hooks[static_cast<size_t>(defId)];
+  sol::object f = h.spec["nagi"];
+  if (!f.is<sol::function>()) return e.def(defId).nagi;
+  LuaCtx c{&e, who, inst};
+  auto res = f.as<sol::function>()(c);
+  if (!res.valid()) return e.def(defId).nagi;
+  return res.get<int>();
+}
+
 int EffectHost::eval_cost(Engine& e, int defId, Player who, int inst) {
   const auto& h = impl_->hooks[static_cast<size_t>(defId)];
   sol::object f = h.spec["cost"];
@@ -1095,6 +1345,61 @@ ResetInfo EffectHost::reset_info(int defId) const {
 
 void EffectHost::fire(Engine& e, const std::string& event, Player subject, Attack* atk, int card,
                       bool first) {
+  // Does this card have a trigger for `event` that passes the zone filter?
+  auto matches = [&](Player owner, int inst) {
+    (void)owner;
+    const auto& h = impl_->hooks[static_cast<size_t>(e.def_of(inst).id)];
+    for (const sol::table& t : h.triggers) {
+      if (t.get_or("event", std::string()) != event) continue;
+      const std::string wantZone = t.get_or("zone", std::string());
+      const Zone z = e.ci(inst).zone;
+      if (wantZone.empty()) {
+        if (z != Zone::Enhance && z != Zone::Special && z != Zone::Removed) continue;
+      } else if (wantZone == "discard") {
+        if (z != Zone::Discard) continue;
+      } else if (wantZone == "hand") {
+        if (z != Zone::Hand) continue;
+      }
+      return true;
+    }
+    return false;
+  };
+  auto resolve = [&](Player owner, int inst) {
+    const CardDef& d = e.def_of(inst);
+    const auto& h = impl_->hooks[static_cast<size_t>(d.id)];
+    for (const sol::table& t : h.triggers) {
+      if (t.get_or("event", std::string()) != event) continue;
+      const std::string wantZone = t.get_or("zone", std::string());
+      const Zone z = e.ci(inst).zone;
+      if (wantZone.empty()) {
+        // Implicit triggers only fire while the card is in play: an expanded
+        // 付与, a used 切札, or the active 变形 aura. Hand / discard triggers
+        // must opt in with zone="hand" / zone="discard".
+        if (z != Zone::Enhance && z != Zone::Special && z != Zone::Removed) continue;
+      } else if (wantZone == "discard") {
+        if (z != Zone::Discard) continue;
+      } else if (wantZone == "hand") {
+        if (z != Zone::Hand) continue;
+      }
+      LuaCtx c{&e, owner, inst};
+      LuaEvent le{&e, event, subject, atk, card, first};
+      sol::object cond = t["cond"];
+      if (cond.is<sol::function>()) {
+        auto r = cond.as<sol::function>()(c, le);
+        if (!r.valid() || !r.get<bool>()) continue;
+      }
+      sol::object run = t["run"];
+      if (run.is<sol::function>()) {
+        auto r = run.as<sol::function>()(c, le);
+        if (!r.valid())
+          impl_->fail("trigger " + event + " in " + std::to_string(d.id) + ": " +
+                      sol::error(r).what());
+      }
+    }
+  };
+
+  // Candidate (owner, card) pairs, active player first.
+  std::vector<std::pair<Player, int>> cand;
   for (int oi = 0; oi < 2; ++oi) {
     Player owner = (oi == 0) ? e.st.active : opp(e.st.active);
     std::vector<int> cards;
@@ -1107,48 +1412,58 @@ void EffectHost::fire(Engine& e, const std::string& event, Player subject, Attac
     // A card that wants to trigger from the discard pile opts in with zone="discard".
     for (int inst : e.ps(owner).discard) {
       const auto& dh = impl_->hooks[static_cast<size_t>(e.def_of(inst).id)];
-      bool wants = false;
       for (const sol::table& t : dh.triggers)
         if (t.get_or("zone", std::string()) == "discard") {
-          wants = true;
+          cards.push_back(inst);
           break;
         }
-      if (wants) cards.push_back(inst);
     }
-    for (int inst : cards) {
-      const CardDef& d = e.def_of(inst);
-      const auto& h = impl_->hooks[static_cast<size_t>(d.id)];
-      for (const sol::table& t : h.triggers) {
-        if (t.get_or("event", std::string()) != event) continue;
-        const std::string wantZone = t.get_or("zone", std::string());
-        const Zone z = e.ci(inst).zone;
-        if (wantZone.empty()) {
-          // Implicit triggers only fire while the card is in play: an expanded
-          // 付与, a used 切札, or the active 变形 aura. Triggers that fire from
-          // the hand or the discard pile must opt in with zone="hand"/"discard".
-          if (z != Zone::Enhance && z != Zone::Special && z != Zone::Removed) continue;
-        } else if (wantZone == "discard") {
-          if (z != Zone::Discard) continue;
-        } else if (wantZone == "hand") {
-          if (z != Zone::Hand) continue;
-        }
-        LuaCtx c{&e, owner, inst};
-        LuaEvent le{&e, event, subject, atk, card, first};
-        sol::object cond = t["cond"];
-        if (cond.is<sol::function>()) {
-          auto r = cond.as<sol::function>()(c, le);
-          if (!r.valid() || !r.get<bool>()) continue;
-        }
-        sol::object run = t["run"];
-        if (run.is<sol::function>()) {
-          auto r = run.as<sol::function>()(c, le);
-          if (!r.valid())
-            impl_->fail("trigger " + event + " in " + std::to_string(d.id) + ": " +
-                        sol::error(r).what());
-        }
-      }
-    }
+    for (int inst : cards)
+      if (matches(owner, inst)) cand.push_back({owner, inst});
   }
+
+  // 结束阶段的多个触发视为同一时刻触发：由当前玩家决定结算顺序。
+  const bool ordered = (event == "end_phase_start" || event == "turn_end");
+  if (!ordered || cand.size() <= 1) {
+    for (const auto& [owner, inst] : cand) resolve(owner, inst);
+    return;
+  }
+  while (!cand.empty()) {
+    size_t pick = 0;
+    if (cand.size() > 1) {
+      Request r;
+      r.kind = "option";
+      r.prompt = "结束阶段：选择下一个结算的触发";
+      for (const auto& [owner, inst] : cand) {
+        std::string label = e.def_of(inst).name;
+        if (owner != e.st.active) label += "（对手）";
+        r.options.push_back({label, true, {}});
+      }
+      Decision d = e.decide(e.st.active, std::move(r));
+      if (!d.indices.empty() && d.indices[0] >= 0 &&
+          d.indices[0] < static_cast<int>(cand.size()))
+        pick = static_cast<size_t>(d.indices[0]);
+    }
+    auto chosen = cand[pick];
+    cand.erase(cand.begin() + static_cast<long>(pick));
+    resolve(chosen.first, chosen.second);
+  }
+}
+
+void EffectHost::run_on_response(Engine& e, Attack* a) {
+  auto it = impl_->onResponse.find(a);
+  if (it == impl_->onResponse.end()) return;
+  for (auto& [who, f] : it->second) {
+    LuaCtx c{&e, who, a->sourceInst};
+    LuaAttack ha{a, &e};
+    auto r = f(c, ha);
+    if (!r.valid()) impl_->fail(std::string("on_response: ") + sol::error(r).what());
+  }
+}
+
+void EffectHost::clear_attack_callbacks(Attack* a) {
+  impl_->onResponse.erase(a);
+  impl_->afterAttack.erase(a);
 }
 
 void EffectHost::run_after_attack(Engine& e, Attack* a) {

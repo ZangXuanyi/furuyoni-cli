@@ -101,7 +101,7 @@ return {
     transform = true,
     on_transform = function(ctx)
       ctx:cower(ctx:opp())
-      ctx:set_next_draw_one(ctx:player())  -- 下个回合开始时只抽一张牌
+      ctx:set_next_draw_one(ctx:opp())  -- 对手的下一次准备阶段少抽一张牌
     end,
     extra_basic = function(ctx)
       ctx:attack { range = { { 2, 2 }, { 4, 4 }, { 6, 6 }, { 8, 8 } }, damage = { aura = 2, life = 1 },

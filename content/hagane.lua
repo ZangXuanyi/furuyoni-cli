@@ -164,7 +164,7 @@ return {
     end } },
 
   { set = "hagane.A1", form = "A1", num = 999, name = "炼成攻击", kind = "normal",
-    type = "attack", extra = true,
+    type = "attack", extra = true, unsealable = true, no_opponent_pick = true,
     attack = function(ctx)
       local me = ctx:player()
       local host = ctx:find_named(me, "大炼成·原限")

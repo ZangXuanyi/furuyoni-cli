@@ -16,6 +16,7 @@ find_package(nlohmann_json REQUIRED)
 add_library(furuyoni
   src/engine/engine.cpp
   src/engine/engine_attack.cpp
+  src/engine/engine_content.cpp
   src/engine/engine_observe.cpp
   src/engine/engine_setup.cpp
   src/engine/effect_host.cpp

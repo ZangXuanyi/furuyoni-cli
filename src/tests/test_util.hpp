@@ -36,6 +36,12 @@ inline void load_standard(Engine& e) {
   for (const char* f : standard_files()) e.load_content(find_file(f));
 }
 
+// Load every bundled module through the pack manifest (达人 + 官方 + bans).
+inline void load_all_content(Engine& e) {
+  e.load_manifest(find_file("content/packs.json"));
+  e.load_combo_bans(find_file("content/combo_bans.json"));
+}
+
 // First def matching a set-id or goddess-id plus a card name.
 inline int find_def(const Engine& e, const std::string& setOrGoddess, const std::string& name) {
   for (const auto& d : e.defs)

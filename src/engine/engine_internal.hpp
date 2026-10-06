@@ -62,6 +62,7 @@ inline std::vector<int>* zone_ptr(GameState& st, Player owner, Zone z) {
     case Zone::Parts:   return &st.p[owner].parts;
     case Zone::Sealed:  return nullptr;
     case Zone::Bag:     return &st.p[owner].bag;
+    case Zone::Memory:  return &st.p[owner].memory;
     case Zone::Removed: return nullptr;
     case Zone::Limbo:   return nullptr;
   }
@@ -86,6 +87,11 @@ inline std::string goddess_display(const std::string& g, const std::string& form
   if (g == "kururu") return form == "A1" ? "机" : form == "A2" ? "友" : "络";
   if (g == "raira") return form == "A1" ? "岚" : "爪";
   if (g == "thallya") return form == "A1" ? "新" : "骑";
+  if (g == "utsuro") return form == "A1" ? "尘" : "镰";
+  if (g == "honoka") return form == "A1" ? "勾" : "旗";
+  if (g == "konuru") return form == "A1" ? "炼" : "橇";
+  if (g == "yatsuha") return form == "AA1" ? "魂" : (form == "A1" ? "花" : "镜");
+  if (g == "kamuwi") return "剑";
   return g;
 }
 

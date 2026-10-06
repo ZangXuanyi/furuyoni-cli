@@ -24,7 +24,6 @@ int Engine::lua_error_count() const { return effects_->error_count(); }
 
 Engine::~Engine() = default;
 
-void Engine::load_content(const std::string& f) { effects_->load_file(f, defs); }
 
 void Engine::set_agent(Player p, Agent* a) { agents_[p] = a; }
 
@@ -189,10 +188,7 @@ void Engine::move_card(int inst, Zone z) {
   if (leavingEnhance && z != Zone::Enhance && z != Zone::Special) {
     int cr = c.crystals;
     c.crystals = 0;
-    if (defs[static_cast<size_t>(c.def)].decayTo == "distance")
-      st.distance += cr;
-    else
-      st.dust += cr;
+    decay_crystals(inst, cr);
   }
   Zone old = c.zone;
   if (auto* v = zone_ptr(st, c.holder, old))
@@ -236,9 +232,15 @@ void Engine::add_crystals(AreaRef a, int n) {
     case AreaKind::Life:
       st.p[a.p].life = std::clamp(st.p[a.p].life + n, 0, st.maxLife);
       break;
-    case AreaKind::Aura:
-      st.p[a.p].aura = std::clamp(st.p[a.p].aura + n, 0, max_aura(a.p));
+    case AreaKind::Aura: {
+      bool was_full = armor_full(a.p);
+      st.p[a.p].aura =
+          std::clamp(st.p[a.p].aura + n, 0, std::max(0, max_aura(a.p) - st.p[a.p].ice));
+      // 装变满的瞬间（吹雪式的即再起）——不是由本牌的冻结造成的。
+      if (!was_full && n > 0 && armor_full(a.p))
+        fire("armor_full", a.p, nullptr, -1, false);
       break;
+    }
     case AreaKind::Flare:    st.p[a.p].flare = std::max(0, st.p[a.p].flare + n); break;
     case AreaKind::Distance: st.distance = std::max(0, st.distance + n); break;
     case AreaKind::Dust:     st.dust = std::max(0, st.dust + n); break;
@@ -255,11 +257,30 @@ int Engine::move_crystals(AreaRef from, AreaRef to, int n, bool cardEffect) {
   int cap = std::numeric_limits<int>::max();
   switch (to.kind) {
     case AreaKind::Life: cap = st.maxLife - st.p[to.p].life; break;
-    case AreaKind::Aura: cap = max_aura(to.p) - st.p[to.p].aura; break;
+    case AreaKind::Aura:
+      cap = max_aura(to.p) - st.p[to.p].aura - st.p[to.p].ice;  // 冰晶也占位
+      break;
     default: break;
   }
   int moved = std::min({n, amount(from), cap});
   if (moved <= 0) return 0;
+  // 血飞沫: 若任意数量的樱花结晶将被移动到敌装，则改为移动到虚，并此牌上的 1 个献移动到虚。
+  if (to.kind == AreaKind::Aura && from.kind != AreaKind::Card) {
+    int host = deny_aura_host(to.p);
+    if (host >= 0) {
+      int a0 = st.p[P0].aura, a1 = st.p[P1].aura;
+      add_crystals(from, -moved);
+      add_crystals(AreaRef::dust(), moved);
+      if (ci(host).crystals > 0) {
+        ci(host).crystals -= 1;
+        add_crystals(AreaRef::dust(), 1);
+        drop_enhance_if_empty(host);
+      }
+      if (st.p[P0].aura != a0) notify_aura_changed(P0);
+      if (st.p[P1].aura != a1) notify_aura_changed(P1);
+      return moved;
+    }
+  }
   int a0 = st.p[P0].aura, a1 = st.p[P1].aura;
   add_crystals(from, -moved);
   add_crystals(to, moved);
@@ -332,6 +353,8 @@ int Engine::gain_extra(Player p, const std::string& name) {
       int inst = add_instance(d.id, p);
       move_card(inst, Zone::Special);
       ci(inst).faceUp = false;
+      // A 追加牌 leaves the 追加牌区 here: 四季轮回 etc. may react.
+      fire("extra_gained", p, nullptr, inst, false);
       return inst;
     }
   return -1;
@@ -349,6 +372,15 @@ void Engine::gain_vigor(Player p, int n) {
 }
 
 void Engine::draw(Player p, int n) {
+  // 此目所及之物与世: 可以不抽牌，改为从回忆区取等量的牌加入手牌。
+  if (n > 0 && has_memory_draw(p) && memory_size(p) > 0) {
+    Request r;
+    r.kind = "option";
+    r.prompt = "此目所及之物与世：从回忆区取牌代替抽牌？";
+    r.options.push_back({"抽牌", true, {}});
+    r.options.push_back({"从回忆区取牌", true, {}});
+    if (ask_one(p, std::move(r)) == 1) n -= memory_draw(p, n);
+  }
   for (int i = 0; i < n; ++i) {
     if (st.over) return;
     PlayerState& s = ps(p);
@@ -367,8 +399,23 @@ void Engine::draw(Player p, int n) {
 
 void Engine::rebuild(Player p, bool costLife) {
   if (costLife) {
-    lose_life(p, 1, false);  // rebuild life loss does not trigger 破绽
-    if (st.over) return;
+    // 此目所及之物与世: 可以改为从回忆区永久移除一张牌来抵消这次洗牌伤害。
+    if (has_memory_shield(p) && memory_size(p) > 0) {
+      Request r;
+      r.kind = "option";
+      r.prompt = "此目所及之物与世：抵消这次重铸命伤？";
+      r.options.push_back({"受到1命伤", true, {}});
+      r.options.push_back({"从回忆区永久移除一张牌", true, {}});
+      if (ask_one(p, std::move(r)) == 1) {
+        int inst = ps(p).memory.back();
+        move_card(inst, Zone::Removed);
+        costLife = false;
+      }
+    }
+    if (costLife) {
+      lose_life(p, 1, false);  // rebuild life loss does not trigger 破绽
+      if (st.over) return;
+    }
   }
   PlayerState& s = ps(p);
   std::vector<int> all;
@@ -524,21 +571,65 @@ std::string Engine::card_zone(int inst) const {
 }
 
 void Engine::start_phase(Player p) {
+  // 神居: 你的回合开始时，命 5-9 → 被诅咒 1 次；命 < 5 → 被诅咒 2 次。
+  if (ps(p).hasCurse && ps(p).life >= 5 && ps(p).life <= 9)
+    add_curse(p, 1);
+  else if (ps(p).hasCurse && ps(p).life < 5)
+    add_curse(p, 2);
+  if (st.over) return;
   gain_vigor(p, 1);
   std::vector<int> list;
   for (int inst : ps(p).enhance) list.push_back(inst);
   for (int inst : ps(p).special)
     if (ci(inst).faceUp && def_of(inst).nagi >= 0) list.push_back(inst);
-  for (int inst : list) {
-    if (st.over) return;
-    if (ci(inst).zone == Zone::Enhance || ci(inst).zone == Zone::Special)
-      if (ci(inst).crystals > 0) consume_enhance_crystal(inst);
+  // 同一位付与牌的 -1 视为同一时刻触发：由当前玩家决定顺序。
+  std::vector<int> skipped;
+  while (!st.over) {
+    std::vector<int> cand;
+    for (int inst : list)
+      if (std::find(skipped.begin(), skipped.end(), inst) == skipped.end() &&
+          ci(inst).crystals > 0 &&
+          (ci(inst).zone == Zone::Enhance ||
+           (ci(inst).zone == Zone::Special && ci(inst).faceUp)))
+        cand.push_back(inst);
+    if (cand.empty()) break;
+    int chosen = cand[0];
+    if (cand.size() > 1) {
+      Request r;
+      r.kind = "option";
+      r.prompt = "准备阶段：付与牌的樱花结晶 -1（选择结算顺序）";
+      for (int inst : cand) r.options.push_back({def_of(inst).name, true, {}});
+      int idx = ask_one(p, std::move(r));
+      if (idx >= 0 && idx < static_cast<int>(cand.size())) chosen = cand[static_cast<size_t>(idx)];
+    }
+    // 寒冰荆棘: 对手被冻结时，可以选择不移除本牌上的樱花结晶。
+    if (def_of(chosen).maySkipCrystalLoss && frozen(opp(p))) {
+      Request r;
+      r.kind = "option";
+      r.prompt = "寒冰荆棘：对手被冻结，是否不移除本牌上的樱花结晶？";
+      r.options.push_back({"不移除", true, {}});
+      r.options.push_back({"移除", true, {}});
+      if (ask_one(p, std::move(r)) == 0) {
+        skipped.push_back(chosen);
+        continue;
+      }
+    }
+    consume_enhance_crystal(chosen);
   }
+  if (st.over) return;
   if (st.over) return;
   run_rebuild(p);
   if (st.over) return;
   draw(p, ps(p).nextDrawOne ? 1 : 2);  // 夜叉: 下个回合开始时只抽一张
   ps(p).nextDrawOne = false;
+}
+
+int Engine::absorb_aura_host(Player p) const {
+  for (int inst : ps(p).enhance)
+    if (def_of(inst).absorbAuraBasic) return inst;
+  for (int inst : ps(p).special)
+    if (ci(inst).faceUp && def_of(inst).absorbAuraBasic) return inst;
+  return -1;
 }
 
 bool Engine::basic_legal(Player p, BasicAction a) const {
@@ -547,11 +638,17 @@ bool Engine::basic_legal(Player p, BasicAction a) const {
   switch (a) {
     case BasicAction::Advance:
       return !ps(p).cannotAdvance && distance() > near_distance() && distance() >= 1 &&
-             ps(p).aura < max_aura(p);
+             aura_free(p) > 0;  // 冰晶占位
     case BasicAction::Retreat:
       return !has_named_active(opp(p), cards::kMud) && ps(p).aura >= 1;
-    case BasicAction::Aura:    return st.dust >= 1 && ps(p).aura < max_aura(p);
-    case BasicAction::Flare:   return ps(p).aura >= 1;
+    case BasicAction::Aura: {
+      if (st.dust < 1) return false;
+      if (aura_free(p) > 0) return true;
+      // 双掌生花: 自装满时仍可装附（结晶改为放到该牌上），但打出时的那次不替换。
+      return absorb_aura_host(p) >= 0 && !ps(p).suppressAuraRedirect;
+    }
+    case BasicAction::Flare:
+      return !has_enemy_no_flare(p) && (frozen(p) || ps(p).aura >= 1);
     case BasicAction::Escape:
       return !has_named_active(opp(p), cards::kMud) && distance() <= near_distance() && st.dust >= 1;
   }
@@ -563,8 +660,31 @@ bool Engine::do_basic(Player p, BasicAction a) {
   switch (a) {
     case BasicAction::Advance: move_crystals(AreaRef::distance(), AreaRef::aura(p), 1, false); break;
     case BasicAction::Retreat: move_crystals(AreaRef::aura(p), AreaRef::distance(), 1, false); break;
-    case BasicAction::Aura:    move_crystals(AreaRef::dust(), AreaRef::aura(p), 1, false); break;
-    case BasicAction::Flare:   move_crystals(AreaRef::aura(p), AreaRef::flare(p), 1, false); break;
+    case BasicAction::Aura: {
+      int host = absorb_aura_host(p);
+      bool redirect = false;
+      if (host >= 0 && !ps(p).suppressAuraRedirect && st.dust >= 1) {
+        Request r;
+        r.kind = "option";
+        r.prompt = "装附：结晶移到自装，还是移到「" + def_of(host).name + "」上？";
+        r.options.push_back({"装到自装", true, {}});
+        r.options.push_back({"装到" + def_of(host).name, true, {}});
+        redirect = ask_one(p, std::move(r)) == 1;
+      }
+      if (redirect)
+        move_crystals(AreaRef::dust(), AreaRef::card(host), 1, false);
+      else
+        move_crystals(AreaRef::dust(), AreaRef::aura(p), 1, false);
+      ps(p).suppressAuraRedirect = false;
+      fire("basic_aura", p, nullptr, -1, false);  // 双掌生花: 检查是否恰好 5
+      break;
+    }
+    case BasicAction::Flare:
+      if (frozen(p))
+        ps(p).ice -= 1;  // 被冻结时，聚气改为移除 1 个冰晶
+      else
+        move_crystals(AreaRef::aura(p), AreaRef::flare(p), 1, false);
+      break;
     case BasicAction::Escape:  move_crystals(AreaRef::dust(), AreaRef::distance(), 1, false); break;
   }
   // Rule 19/94: a basic action performed by a card effect still counts as one.
@@ -669,22 +789,210 @@ void Engine::reset_special(int inst) {
   if (ci(inst).zone == Zone::Special && ci(inst).faceUp) {
     // A special that is currently an expanded enhancement keeps its 献; when it
     // is turned back to unused, those crystals must leave play (to dust/decay).
-    if (ci(inst).crystals > 0) {
+    if (ci(inst).crystals > 0 && !def_of(inst).keepCrystalsOnReset) {
       int c = ci(inst).crystals;
       ci(inst).crystals = 0;
-      if (def_of(inst).decayTo == "distance")
-        st.distance += c;
-      else
-        st.dust += c;
+      decay_crystals(inst, c);
     }
     ci(inst).faceUp = false;
-    clamp_aura(ci(inst).owner);
-    fire("special_reset", ci(inst).owner, nullptr, inst, false);  // 魔能吸收
+    // A borrowed 切札付与 returns to its owner when it stops being expanded.
+    if (ci(inst).holder != ci(inst).owner) {
+      move_card(inst, Zone::Limbo);
+      ci(inst).holder = ci(inst).owner;
+      move_card(inst, Zone::Special);
+    }
+    clamp_aura(ci(inst).holder);
+    fire("special_reset", ci(inst).holder, nullptr, inst, false);  // 魔能吸收
   }
 }
 
+int Engine::aura_free(Player p) const {
+  return std::max(0, max_aura(p) - ps(p).aura - ps(p).ice);
+}
+
+void Engine::fire_armor_full_if_new(Player p, int cause) {
+  // 装从"有空位"变成"满"的瞬间（吹雪式的即再起）；cause = 造成变化的牌实例或 -1。
+  if (armor_full(p)) fire("armor_full", p, nullptr, cause, false);
+}
+
+int Engine::freeze(Player p, int n, int cause) {
+  int add = std::min(n, aura_free(p));
+  if (add <= 0) return 0;
+  bool was_full = armor_full(p);
+  ps(p).ice += add;
+  if (!was_full && armor_full(p)) fire("armor_full", p, nullptr, cause, false);
+  return add;
+}
+
+int Engine::mirror(Player p) const {
+  const PlayerState& a = ps(p);
+  const PlayerState& b = ps(opp(p));
+  int n = 0;
+  if (a.aura == b.aura) n += 1;
+  if (a.flare == b.flare) n += 1;
+  if (a.life == b.life) n += 1;
+  return n;
+}
+
+void Engine::to_memory(int inst) {
+  // 扣置入回忆区：不结算弃置时效果，其上的樱花结晶移到虚。
+  if (ci(inst).crystals > 0) {
+    int n = ci(inst).crystals;
+    ci(inst).crystals = 0;
+    decay_crystals(inst, n);
+  }
+  move_card(inst, Zone::Memory);
+  ci(inst).faceUp = false;
+}
+
+int Engine::memory_size(Player p) const { return static_cast<int>(ps(p).memory.size()); }
+
+bool Engine::has_memory_draw(Player p) const {
+  for (int inst : ps(p).enhance)
+    if (def_of(inst).memoryDraw) return true;
+  for (int inst : ps(p).special)
+    if (ci(inst).faceUp && def_of(inst).memoryDraw) return true;
+  return false;
+}
+
+bool Engine::has_memory_shield(Player p) const {
+  for (int inst : ps(p).enhance)
+    if (def_of(inst).memoryRebuildShield) return true;
+  for (int inst : ps(p).special)
+    if (ci(inst).faceUp && def_of(inst).memoryRebuildShield) return true;
+  return false;
+}
+
+int Engine::memory_draw(Player p, int n) {
+  int got = 0;
+  for (int i = 0; i < n; ++i) {
+    if (ps(p).memory.empty()) break;
+    int inst = ps(p).memory.back();
+    move_card(inst, Zone::Hand);
+    ci(inst).faceUp = true;
+    got += 1;
+    // 使用后：八叶的牌从回忆区加入手牌时，可以选择将其升级。
+    if (has_memory_draw(p) && can_upgrade(inst)) {
+      Request r;
+      r.kind = "option";
+      r.prompt = "此目所及之物与世：将「" + def_of(inst).name + "」升级为完全态？";
+      r.options.push_back({"升级", true, {}});
+      r.options.push_back({"不升级", true, {}});
+      if (ask_one(p, std::move(r)) == 0) upgrade_card(inst);
+    }
+  }
+  return got;
+}
+
+void Engine::all_normals_to_memory(Player p, int except) {
+  std::vector<int> all;
+  auto add = [&](const std::vector<int>& v) { all.insert(all.end(), v.begin(), v.end()); };
+  add(ps(p).deck);
+  add(ps(p).hand);
+  add(ps(p).discard);
+  add(ps(p).cover);
+  add(ps(p).enhance);
+  for (int inst : all) {
+    if (def_of(inst).kind != CardKind::Normal) continue;
+    if (inst == except) continue;  // 旅途: 保留至多 1 张手牌
+    if (ci(inst).zone == Zone::Removed || ci(inst).zone == Zone::Memory) continue;
+    to_memory(inst);  // 不结算弃置时效果
+  }
+}
+
+int Engine::count_complete(Player p) const {
+  int n = 0;
+  for (const CardInstance& c : st.insts)
+    if (c.holder == p && def_of(c.inst).complete && c.zone != Zone::Removed) n += 1;
+  return n;
+}
+
+int Engine::lose_external(AreaRef a, int n) {
+  int before = amount(a);
+  add_crystals(a, -n);
+  int moved = before - amount(a);
+  externalAdded_ -= moved;
+  return moved;
+}
+
+bool Engine::reverse_moves_active(Player p) const {
+  for (int inst : ps(p).enhance)
+    if (def_of(inst).reverseMoves) return true;
+  for (int inst : ps(p).special)
+    if (ci(inst).faceUp && def_of(inst).reverseMoves) return true;
+  return false;
+}
+
+bool Engine::can_upgrade(int inst) const {
+  if (inst < 0) return false;
+  const CardDef& d = def_of(inst);
+  if (d.upgrade.empty()) return false;
+  for (const CardDef& t : defs)
+    if (t.name == d.upgrade && t.goddess == d.goddess) return true;
+  return false;
+}
+
+bool Engine::upgrade_card(int inst) {
+  if (!can_upgrade(inst)) return false;
+  const CardDef& d = def_of(inst);
+  for (const CardDef& t : defs)
+    if (t.name == d.upgrade && t.goddess == d.goddess) {
+      ci(inst).def = t.id;
+      fire("upgraded", ci(inst).holder, nullptr, inst, false);
+      return true;
+    }
+  return false;
+}
+
+bool Engine::has_enemy_no_flare(Player p) const {
+  // p 的对手场上有 enemy_no_flare 的牌 → p 不能聚气（冻僵）。
+  Player o = opp(p);
+  for (int inst : ps(o).enhance)
+    if (def_of(inst).enemyNoFlare) return true;
+  for (int inst : ps(o).special)
+    if (ci(inst).faceUp && def_of(inst).enemyNoFlare) return true;
+  return false;
+}
+
+int Engine::nagi_value(int defId, Player p, int inst) {
+  const CardDef& d = def(defId);
+  if (d.dynamicNagi) return std::max(0, effects_->eval_nagi(*this, defId, p, inst));
+  return d.nagi;
+}
+
+void Engine::add_curse(Player p, int n) {
+  if (n <= 0 || st.over) return;
+  int before = ps(p).curse;
+  ps(p).curse += n;
+  fire("cursed", p, nullptr, -1, false);  // 尸: 即再起（诅咒变为 6 / 12）
+  if (ps(p).curse >= 16) {  // 诅咒 >= 16 即死亡（另一个死亡条件是命 == 0）
+    if (ps(p).life > 0) damage_life(p, ps(p).life, AreaKind::Flare, true);  // 保持结晶守恒
+    check_win();
+  }
+  (void)before;
+}
+
+bool Engine::protects_enemy(Player p) const {
+  // p 的对手有 protects_enemy 的牌 → p 不会死亡（21 阡）。
+  Player o = opp(p);
+  for (int inst : ps(o).enhance)
+    if (def_of(inst).protectsEnemy) return true;
+  for (int inst : ps(o).special)
+    if (enhance_active(inst) && def_of(inst).protectsEnemy) return true;
+  return false;
+}
+
+int Engine::deny_aura_host(Player p) const {
+  Player o = opp(p);
+  for (int inst : ps(o).enhance)
+    if (def_of(inst).denyEnemyAura) return inst;
+  for (int inst : ps(o).special)
+    if (enhance_active(inst) && def_of(inst).denyEnemyAura) return inst;
+  return -1;
+}
+
 void Engine::clamp_aura(Player p) {
-  int over = ps(p).aura - max_aura(p);
+  int over = ps(p).aura + ps(p).ice - max_aura(p);
   if (over > 0) {
     ps(p).aura -= over;
     st.dust += over;  // 自装中多于上限的部分移到虚
@@ -801,9 +1109,20 @@ void Engine::main_phase(Player p) {
       }
     }
 
+    // 尸: 本回合对手的下一次攻击要额外弃一张该女神的牌；没有可弃的牌就不能攻击。
+    std::string extraGoddess = ps(p).extraAttackCostGoddess;
+    bool extraPayable = false;
+    if (!extraGoddess.empty()) {
+      for (int h : ps(p).hand)
+        if (def_of(h).goddess == extraGoddess) extraPayable = true;
+      for (int h : ps(p).special)
+        if (!ci(h).faceUp && def_of(h).goddess == extraGoddess) extraPayable = true;
+    }
     for (int inst : ps(p).hand) {
       const CardDef& d = def_of(inst);
       if (d.kind != CardKind::Normal) continue;
+      if (d.responseOnly) continue;  // 格杀: 仅限对应打出
+      if (d.type == CardType::Attack && !extraGoddess.empty() && !extraPayable) continue;
       bool fp = (d.flags & CF_FullPower) != 0;
       if (fp && mainDirty_) continue;
       if (d.centrifugal && !centrifugal_ok(p)) continue;
@@ -846,6 +1165,7 @@ void Engine::main_phase(Player p) {
     for (int inst : ps(p).special) {
       if (ci(inst).faceUp) continue;
       const CardDef& d = def_of(inst);
+      if (d.kind != CardKind::Special) continue;  // normal EX cards live elsewhere
       if (ps(p).flare < cut_cost(p, d.id, inst)) continue;
       if (!playable_card(p, inst)) continue;
       bool fp = (d.flags & CF_FullPower) != 0;
@@ -1061,6 +1381,8 @@ void Engine::play_turn(Player p) {
     playedCentrifugalThisTurn_[i] = false;
     playedLianchengThisTurn_[i] = false;
     ps(pl).cannotAdvance = false;
+    ps(pl).tempDistanceMod = 0;      // 影飞翅: only until end of turn
+    ps(pl).tempNearDistanceMod = 0;
     didBasicThisTurn_[i] = false;
     rebuiltThisTurn_[i] = false;
     usedFullPowerThisTurn_[i] = false;
@@ -1080,7 +1402,8 @@ void Engine::play_turn(Player p) {
     start_phase(p);
   }
   phase_ = "main";
-  if (!st.over) main_phase(p);
+  if (!st.over && !ps(p).skipMainPhase) main_phase(p);  // 踽踽虚路行
+  ps(p).skipMainPhase = false;
   phase_ = "cover";
   if (!st.over) cover_phase(p);
   phase_ = "end";
@@ -1126,6 +1449,7 @@ void Engine::prepare_strategy(Player p) {
 }
 
 void Engine::seal_card(int host, int card) {
+  if (card < 0 || def_of(card).unsealable) return;  // 炼成攻击: 不可封印
   move_card(card, Zone::Sealed);
   ci(card).sealedBy = host;
   ci(host).sealed.push_back(card);
@@ -1141,7 +1465,7 @@ void Engine::return_sealed(int host) {
 }
 
 int Engine::distance_delta() const {
-  int d = 0;
+  int d = ps(P0).tempDistanceMod + ps(P1).tempDistanceMod;  // 影飞翅 (this turn)
   for (int oi = 0; oi < 2; ++oi) {
     Player o = static_cast<Player>(oi);
     d += ps(o).steamOnDist - ps(o).steamOnCrystal;  // 气动
@@ -1153,8 +1477,77 @@ int Engine::distance_delta() const {
   return d;
 }
 
+int Engine::areas_with(int n) const {
+  // 新幕来临: areas are both players' 装/气/命, 距, 虚, and every 付与牌 on the field.
+  int c = 0;
+  for (int pi = 0; pi < 2; ++pi) {
+    Player p = static_cast<Player>(pi);
+    if (ps(p).aura == n) c++;
+    if (ps(p).flare == n) c++;
+    if (ps(p).life == n) c++;
+  }
+  if (st.distance == n) c++;
+  if (st.dust == n) c++;
+  for (int pi = 0; pi < 2; ++pi) {
+    Player p = static_cast<Player>(pi);
+    for (int inst : ps(p).enhance)
+      if (ci(inst).crystals == n) c++;
+    for (int inst : ps(p).special)
+      if (enhance_active(inst) && ci(inst).crystals == n) c++;
+  }
+  return c;
+}
+
+bool Engine::has_damage_immunity(Player p) const {
+  for (int inst : ps(p).enhance)
+    if (def_of(inst).damageImmune) return true;
+  for (int inst : ps(p).special)
+    if (ci(inst).faceUp && def_of(inst).damageImmune) return true;
+  return false;
+}
+
+void Engine::decay_crystals(int inst, int n) {
+  if (n <= 0) return;
+  const CardDef& d = def_of(inst);
+  if (d.decayTo == "distance") {
+    st.distance += n;
+    return;
+  }
+  if (d.decayToOwnerAura) {  // 漫天的花道: to the controller's 装 (or 气 when full)
+    Player p = ci(inst).holder;
+    int room = max_aura(p) - ps(p).aura;
+    int toAura = std::min(n, room);
+    ps(p).aura += toAura;
+    if (toAura < n) ps(p).flare += n - toAura;
+    return;
+  }
+  st.dust += n;
+}
+
+void Engine::empty_card(int inst) {
+  if (inst < 0 || ci(inst).crystals <= 0) return;
+  int n = ci(inst).crystals;
+  ci(inst).crystals = 0;
+  decay_crystals(inst, n);
+  drop_enhance_if_empty(inst);
+}
+
+void Engine::remove_all_normals(Player p) {
+  for (int i = 0; i < static_cast<int>(st.insts.size()); ++i) {
+    if (st.insts[static_cast<size_t>(i)].holder != p) continue;
+    if (def_of(i).kind != CardKind::Normal) continue;
+    if (st.insts[static_cast<size_t>(i)].zone == Zone::Removed) continue;
+    if (ci(i).crystals > 0) {  // 献 leave the card before it does
+      int n = ci(i).crystals;
+      ci(i).crystals = 0;
+      decay_crystals(i, n);
+    }
+    move_card(i, Zone::Removed);
+  }
+}
+
 int Engine::near_distance() const {
-  int d = st.nearDistance;
+  int d = st.nearDistance + ps(P0).tempNearDistanceMod + ps(P1).tempNearDistanceMod;
   for (int oi = 0; oi < 2; ++oi) {
     Player o = static_cast<Player>(oi);
     for (int inst : ps(o).enhance) d += def_of(inst).nearDistanceMod;
@@ -1166,6 +1559,16 @@ int Engine::near_distance() const {
 
 int Engine::distance() const {
   int d = st.distance + distance_delta();
+  // 八叶镜陨茕樱: 展开中把有效距离限制在 0..7。
+  for (int oi = 0; oi < 2; ++oi) {
+    Player o = static_cast<Player>(oi);
+    bool lim = false;
+    for (int inst : ps(o).enhance)
+      if (def_of(inst).limitDistance) lim = true;
+    for (int inst : ps(o).special)
+      if (enhance_active(inst) && def_of(inst).limitDistance) lim = true;
+    if (lim) d = std::clamp(d, 0, 7);
+  }
   return d < 0 ? 0 : d;
 }
 
@@ -1250,7 +1653,7 @@ int Engine::sealed_card(int host) const {
 int Engine::drain_card_crystals(int inst, int n) {
   int take = std::min(n, ci(inst).crystals);
   ci(inst).crystals -= take;
-  st.dust += take;
+  decay_crystals(inst, take);
   return take;
 }
 
@@ -1267,6 +1670,11 @@ void Engine::cover_deck(Player p) {
     move_card(inst, Zone::Cover);
     ci(inst).faceUp = false;
   }
+}
+
+void Engine::return_enhance(int inst) {
+  if (ci(inst).zone == Zone::Discard || ci(inst).zone == Zone::Removed)
+    move_card(inst, Zone::Enhance);
 }
 
 void Engine::cover_top(Player p) {

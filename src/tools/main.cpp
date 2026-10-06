@@ -2,7 +2,9 @@
 #include <cstdlib>
 #include <fstream>
 #include <memory>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -22,6 +24,15 @@ static std::string resolve(const std::string& given) {
     }
   }
   return given;
+}
+
+static std::vector<std::string> split_csv(const std::string& s) {
+  std::vector<std::string> out;
+  std::string cur;
+  std::istringstream in(s);
+  while (std::getline(in, cur, ','))
+    if (!cur.empty()) out.push_back(cur);
+  return out;
 }
 
 static bool write_file(const std::string& path, const std::string& content) {
@@ -44,6 +55,15 @@ int main(int argc, char** argv) {
     else if (a == "--limit") cfg.turnLimit = std::atoi(next().c_str());
     else if (a == "--random") useRandom = true;
     else if (a == "--standard") cfg.mode = "standard";
+    else if (a == "--preset") cfg.preset = next();
+    else if (a == "--variants") {
+      std::string v = next();
+      cfg.variantsOverride = (v == "on" || v == "1" || v == "true") ? 1 : 0;
+    } else if (a == "--packs") cfg.allowedPacks = split_csv(next());
+    else if (a == "--allow-custom") cfg.allowCustom = true;
+    else if (a == "--content-dir") cfg.contentDirs.push_back(next());
+    else if (a == "--goddesses") cfg.enabledGoddesses = split_csv(next());
+    else if (a == "--bans") cfg.comboBansFile = next();
     else if (a == "--p0-cmd") p0cmd = next();
     else if (a == "--p1-cmd") p1cmd = next();
     else if (a == "--record") recordPath = next();
@@ -56,11 +76,15 @@ int main(int argc, char** argv) {
   const bool tracing = !tracePath.empty() || !webPath.empty();
   auto load_all = [&](Engine& e) {
     if (cfg.mode == "standard") {
-      for (const char* f : {"content/yurina.lua", "content/saine.lua", "content/himika.lua",
-                            "content/tokoyo.lua", "content/oboro.lua", "content/yukihi.lua",
-                            "content/shinra.lua", "content/hagane.lua", "content/chikage.lua",
-                            "content/kururu.lua", "content/thallya.lua", "content/raira.lua"})
-        e.load_content(resolve(f));
+      // Rules packs come from the manifest; extra module dirs use "dir:pack".
+      if (!cfg.packsFile.empty()) e.load_manifest(resolve(cfg.packsFile));
+      if (!cfg.comboBansFile.empty()) e.load_combo_bans(resolve(cfg.comboBansFile));
+      for (const std::string& d : cfg.contentDirs) {
+        auto c = d.find(':');
+        std::string dir = c == std::string::npos ? d : d.substr(0, c);
+        std::string pack = c == std::string::npos ? "custom" : d.substr(c + 1);
+        e.load_content_dir(resolve(dir), pack);
+      }
     } else {
       e.load_content(resolve(content));
     }
@@ -145,6 +169,7 @@ int main(int argc, char** argv) {
 
   e.run();
 
+  std::printf("ruleset: %s\n", e.ruleset_summary().c_str());
   std::printf("seed=%llu turns=%d winner=%d hash=%llu\n",
               static_cast<unsigned long long>(cfg.seed), e.st.turn, e.st.winner,
               static_cast<unsigned long long>(e.state_hash()));

@@ -22,7 +22,9 @@ ctest --test-dir build --output-on-failure     # 或 ./build/furuyoni-tests
 ```bash
 ./build/furuyoni-cli --random --seed 42                  # 最初的决斗，双方随机
 ./build/furuyoni-cli --seed 42                           # 双方“取第一个合法动作”
-./build/furuyoni-cli --standard --random --seed 42       # 基础四柱：三拾一舍 + 构筑
+./build/furuyoni-cli --standard --random --seed 42       # 默认规则包：起源战全扩
+./build/furuyoni-cli --standard --random --seed 42 --preset gachi-tatsujin  # 完全战达人（含异相）
+./build/furuyoni-cli --standard --random --seed 42 --preset 起源战达人
 ./build/furuyoni-cli --standard --p0-cmd "python3 examples/random_agent.py" --p1-cmd "..."
 
 # 回放展示 WebUI（生成自包含 HTML，用浏览器打开）
@@ -49,7 +51,11 @@ ctest --test-dir build --output-on-failure     # 或 ./build/furuyoni-tests
 ./build/furuyoni-cli --replay /tmp/opencode/r.json          # 校验状态哈希
 ```
 
-命令行参数：`--seed N`、`--limit N`、`--random`、`--p0-cmd CMD`、`--p1-cmd CMD`、`--record FILE`、`--replay FILE`，最后一个位置参数是 Lua 内容文件。
+命令行参数：`--seed N`、`--limit N`、`--random`、`--p0-cmd CMD`、`--p1-cmd CMD`、
+`--record FILE`、`--replay FILE`、`--trace FILE`、`--web FILE`；规则包相关：`--preset NAME`
+（`kigen-full`(默认) / `kigen-tatsujin` / `gachi-full` / `gachi-tatsujin`，中英文别名均可）、
+`--variants on|off`、`--packs a,b`、`--allow-custom`、`--content-dir DIR[:pack]`、`--goddesses a,b`。
+最后一个位置参数是 Lua 内容文件。**内容模块与预设规则包**见 [`docs/content-modules.md`](docs/content-modules.md)。
 
 ---
 
@@ -64,6 +70,7 @@ protocol    Request / Decision / Observation(按玩家过滤) / AgentAdapter
 engine      回合与阶段 / 合法动作枚举 / 攻击结算 / 响应窗口 /
             持续效果 / 破绽 / 切札再起 / RNG / 日志与状态哈希
 effects     Lua 效果宿主 (sol2)：卡片行为的唯一实现处
+content     动态内容模块 + 预设规则包（达人/全扩/自定义 × 异相开关）
 core        ids / Range / Damage / CardDef / CardInstance / GameState / RNG
 content     每套卡组一个 Lua 模块（数据 + 行为）
 ```
