@@ -94,6 +94,14 @@ struct Range {
     it->first += n;
     if (it->first > it->second) spans.erase(it);
   }
+  // 23-Akina O-N5 算法: 本回合内所有攻击获得「距离扩大（近1）」与「距离缩小（远1）」。
+  // 按 rules/01-yurina.md 的说明，距离是整数的集合：扩大（近1）= 加入 min-1；
+  // 缩小（远1）= 去掉 max。因此顺序为先扩大近端、再缩小远端：
+  //   区间 [lo,hi] -> [lo-1,hi-1]；离散值 v -> [v-1,v-1]；1,3,5 -> 0,1,3。
+  void algorithm_shift() {
+    extend_near(1);
+    shrink_far(1);
+  }
   std::string to_string() const {
     std::string s;
     for (size_t i = 0; i < spans.size(); ++i) {
@@ -118,12 +126,19 @@ struct AttackSpec {
   Range range;
   Damage damage;
   uint32_t keywords = 0;
+  bool wound = false;  // 24-Shisui 裂伤攻击: 【{X/Y}】X/Y are wound markers, not damage
 };
 
-enum class AreaKind { Life, Aura, Flare, Distance, Dust, Card };
+// 24-Shisui 裂伤 (wound markers): the three areas a marker can sit in. Wound
+// markers do not occupy a slot and are tracked per (area, causing player).
+enum WoundArea : int { kWoundAura = 0, kWoundFlare = 1, kWoundLife = 2 };
+
+// Waku (26-Innealra 惑) is another per-player crystal zone holding 樱花结晶.
+enum class AreaKind { Life, Aura, Flare, Distance, Dust, Card, Market, Waku };
 
 // Reference to a crystal container. Field areas (Distance/Dust) ignore p; Card
 // areas refer to the crystals sitting on a specific enhancement instance.
+// Market (23-Akina 股市) is a per-player crystal zone holding 樱花结晶.
 struct AreaRef {
   AreaKind kind = AreaKind::Dust;
   Player p = P0;
@@ -135,6 +150,8 @@ struct AreaRef {
   static AreaRef distance() { return {AreaKind::Distance, P0, -1}; }
   static AreaRef dust() { return {AreaKind::Dust, P0, -1}; }
   static AreaRef card(int inst) { return {AreaKind::Card, P0, inst}; }
+  static AreaRef market(Player p) { return {AreaKind::Market, p, -1}; }
+  static AreaRef waku(Player p) { return {AreaKind::Waku, p, -1}; }  // 26-Innealra 惑
 };
 
 enum class BasicAction { Advance, Retreat, Aura, Flare, Escape };

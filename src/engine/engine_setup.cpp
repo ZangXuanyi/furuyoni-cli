@@ -59,14 +59,19 @@ std::vector<int> Engine::deck_def_ids(const std::string& g, const std::string& f
   bool solo = false;
   if (f != "O")
     for (const CardDef& d : defs)
-      if (d.goddess == g && d.form == f && d.soloSpecials) solo = true;
+      if (d.goddess == g && form_matches(d, f) && d.soloSpecials) solo = true;
+  // 26-Innealra: 共有牌用 forms 列出适用形态；命运是不进构筑的隐藏 def。
+  auto eligible = [&](const CardDef& d) {
+    return !d.isPart && !d.isExtra && !d.isPoison && !d.isTransform && !d.soldier &&
+           !d.isDrama && !d.isFate;
+  };
   for (const CardDef& d : defs)
-    if (d.goddess == g && d.form == "O" && !d.isPart && !d.isExtra && !d.isPoison &&
-        !d.isTransform && !(solo && d.kind == CardKind::Special))
+    if (d.goddess == g && form_matches(d, "O") && eligible(d) &&
+        !(solo && d.kind == CardKind::Special))
       chosen[{static_cast<int>(d.kind), d.local}] = d.id;
   if (f != "O")
     for (const CardDef& d : defs)
-      if (d.goddess == g && d.form == f && !d.isPart && !d.isExtra && !d.isPoison && !d.isTransform)
+      if (d.goddess == g && form_matches(d, f) && eligible(d))
         chosen[{static_cast<int>(d.kind), d.local}] = d.id;
   std::vector<int> out;
   for (const auto& [key, id] : chosen) out.push_back(id);
@@ -112,9 +117,35 @@ void Engine::setup_player(Player p, const std::vector<std::pair<std::string, std
       init_transforms(p, f);
     }
     if (g == "raira") ps(p).raira = true;
+    if (g == "megumi") init_soil(p);  // 19-Megumi: 土壤 + 5 个绿色结晶
+    if (g == "kanawe") init_dramas(p);  // 20-Kanawe: 6 张戏剧 + 起始节点
+    if (g == "innealra") init_fates(p, f);  // 26-Innealra: 四个命运入命运槽
   }
+  init_barracks(p, picks);
 
   build_from_pool(p, normals, specials);
+  init_start_used(p);  // 22-Renri 道化的觉悟: 开局即使用后状态
+}
+
+// 18-Mizuki: 兵舍初始构成 = 该形态的全部士兵牌，背面向上（未动员）置于兵舍。
+void Engine::init_barracks(Player p, const std::vector<std::pair<std::string, std::string>>& picks) {
+  ps(p).barracks.clear();
+  std::map<std::pair<int, int>, int> chosen;  // {kind, local} -> def
+  for (const auto& [g, f] : picks) {
+    for (const CardDef& d : defs)
+      if (d.soldier && d.goddess == g && d.form == "O") chosen[{0, d.local}] = d.id;
+    if (f != "O")
+      for (const CardDef& d : defs)
+        if (d.soldier && d.goddess == g && d.form == f) chosen[{0, d.local}] = d.id;
+  }
+  for (const auto& [key, defId] : chosen) {
+    int copies = std::max(1, def(defId).copies);
+    for (int k = 0; k < copies; ++k) {
+      int inst = add_instance(defId, p);
+      ci(inst).soldier = true;
+      to_barracks(p, inst, false);  // 背面向上（未动员）
+    }
+  }
 }
 
 void Engine::init_parts(Player p) {
@@ -280,16 +311,40 @@ void Engine::assemble_part(Player p, int inst) {
 
 void Engine::setup_player_sets(Player p, const std::vector<std::string>& sets) {
   playerSets_[p] = sets;
+  for (const std::string& s : sets) {  // 19-Megumi: 土壤机制（固定牌组模式）
+    if (s == "megumi" || s.rfind("megumi.", 0) == 0) init_soil(p);
+    if (s == "kanawe" || s.rfind("kanawe.", 0) == 0) init_dramas(p);  // 20-Kanawe
+    // 26-Innealra: 固定牌组模式同样要按形态放入命运。
+    if (s == "innealra") init_fates(p, "O");
+    else if (s.rfind("innealra.", 0) == 0) init_fates(p, s.substr(9));
+  }
   std::vector<int> normals, specials;
-  for (const CardDef& d : defs) {
-    if (std::find(sets.begin(), sets.end(), d.set) == sets.end()) continue;
-    int inst = add_instance(d.id, p);
-    if (d.kind == CardKind::Normal)
+  std::vector<int> picked;
+  auto add_def = [&](int defId) {
+    if (vec_has(picked, defId)) return;
+    picked.push_back(defId);
+    int inst = add_instance(defId, p);
+    if (def(defId).kind == CardKind::Normal)
       normals.push_back(inst);
     else
       specials.push_back(inst);
+  };
+  for (const CardDef& d : defs) {
+    if (d.isFate) continue;  // 26-Innealra: 命运不是构筑牌，不进牌组
+    // 26-Innealra: 固定牌组模式也要按形态组装（含 forms 列出的共有牌）。
+    bool innearla = false;
+    for (const std::string& s : sets) {
+      if (s != "innealra" && s.rfind("innealra.", 0) != 0) continue;
+      std::string f = "O";
+      auto dot = s.find('.');
+      if (dot != std::string::npos) f = s.substr(dot + 1);
+      if (d.goddess == "innealra" && form_matches(d, f)) innearla = true;
+    }
+    if (!innearla && std::find(sets.begin(), sets.end(), d.set) == sets.end()) continue;
+    add_def(d.id);
   }
   build_from_pool(p, normals, specials);
+  init_start_used(p);  // 22-Renri 道化的觉悟: 开局即使用后状态
 }
 
 void Engine::build_from_pool(Player p, std::vector<int>& normals, std::vector<int>& specials) {
@@ -352,6 +407,12 @@ std::vector<std::pair<std::string, std::string>> Engine::draft_pick(Player p) {
       cfg.draftPool.empty() ? goddess_pool() : cfg.draftPool;
   for (const auto& g : pool)
     for (const auto& f : available_forms(g)) opts.push_back({g, f});
+  // 空抽选池（例如 --goddesses 写了不存在/未启用的女神）会让 draft_ban 越界。
+  // 这里给出可读的错误，而不是未定义行为。
+  if (opts.empty())
+    throw std::runtime_error(
+        "draft pool is empty: no enabled goddess matched the requested pool "
+        "(check --goddesses / --packs / --content-dir / --allow-custom)");
   Request r;
   r.kind = "draft_pick";
   r.prompt = "choose three goddesses (with form)";
@@ -387,6 +448,7 @@ std::vector<std::pair<std::string, std::string>> Engine::draft_pick(Player p) {
 
 std::pair<std::string, std::string> Engine::draft_ban(
     Player p, const std::vector<std::pair<std::string, std::string>>& opp) {
+  if (opp.empty()) return {"", ""};  // 防御：没有可禁的柱（不应发生，见 draft_pick）
   Request r;
   r.kind = "draft_ban";
   r.prompt = "ban one of the opponent's goddesses";

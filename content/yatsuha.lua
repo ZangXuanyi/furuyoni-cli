@@ -318,9 +318,10 @@ return {
       end
     end },
 
-  -- 终端。限制距离 0-7。使用时&使用后：使用这张牌时或重铸牌库时，可以升级一张八叶的牌，然后畏缩。
+  -- 终端。限制距离 0-7（打出时当前距必须 ∈[0,7]）。使用时&使用后：使用这张牌时或重铸牌库时，可以升级一张八叶的牌，然后畏缩。
   { set = "yatsuha.A1", form = "A1", num = 1, name = "八叶镜陨茕樱", kind = "special",
     type = "action", cost = 1, solo_specials = true, terminal = true,
+    limit_distance = { 0, 7 },
     on_play = function(ctx)
       upgrade_from_hand_or_discard(ctx, "八叶镜陨茕樱：选择一张八叶的牌升级")
       ctx:cower(ctx:player())

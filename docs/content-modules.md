@@ -24,7 +24,10 @@
 
 * `tatsujin` —— 达人包 01–12（仓库自带）。
 * `official` —— 后续官方女神（全扩）。新增官方女神时把模块名加进这个数组即可
-  （当前已登记 `utsuro`(13-虚路)、`honoka`(14-仄佳)、`konuru`(15-凝努)、`yatsuha`(16-八叶)、`kamuwi`(21-神居)）。
+  （当前已登记 13–22 与 23–26 全部官方柱：`utsuro`(13-虚路)、`honoka`(14-仄佳)、`konuru`(15-凝努)、
+  `yatsuha`(16-八叶)、`hatsumi`(17-初海)、`mizuki`(18-水津城)、`megumi`(19-泷河希)、`kanawe`(20-叶慧)、
+  `kamuwi`(21-神居)、`renri`(22-恋离)、`akina`(23-安琪娜)、`shisui`(24-志水)、`misora`(25-观空)、
+  `innealra`(26-诺伦)；全扩共 26 柱）。
 * `custom` —— 自定义女神。
 
 ## 2. 预设

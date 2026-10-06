@@ -167,7 +167,12 @@ int main(int argc, char** argv) {
   if (!recordPath.empty()) e.start_recording();
   if (tracing) e.start_trace();
 
-  e.run();
+  try {
+    e.run();
+  } catch (const std::exception& ex) {
+    std::fprintf(stderr, "game failed: %s\n", ex.what());
+    return 1;
+  }
 
   std::printf("ruleset: %s\n", e.ruleset_summary().c_str());
   std::printf("seed=%llu turns=%d winner=%d hash=%llu\n",

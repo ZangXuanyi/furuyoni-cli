@@ -92,6 +92,15 @@ inline std::string goddess_display(const std::string& g, const std::string& form
   if (g == "konuru") return form == "A1" ? "炼" : "橇";
   if (g == "yatsuha") return form == "AA1" ? "魂" : (form == "A1" ? "花" : "镜");
   if (g == "kamuwi") return "剑";
+  if (g == "hatsumi") return form == "A1" ? "信" : "桨";
+  if (g == "mizuki") return "兜";
+  if (g == "megumi") return form == "A1" ? "端" : "棹";
+  if (g == "kanawe") return "面";
+  if (g == "renri") return form == "A1" ? "遗" : "衣";
+  if (g == "misora") return "弓";
+  if (g == "shisui") return "锯";
+  if (g == "akina") return "算";
+  if (g == "innealra") return form == "A1" ? "现" : (form == "A2" ? "未" : "过");
   return g;
 }
 

@@ -61,7 +61,50 @@ nlohmann::json Engine::full_state_json() const {
     pj["yukihi"] = s.yukihi;
     pj["strategy"] = s.strategy;
     pj["strategyKnown"] = s.strategyKnown;
+    pj["tailwind"] = s.tailwind;  // 航海（回放用完整状态）
+    pj["dive"] = s.dive;          // 潜水（含秘密选择）
+    pj["aim"] = s.aim;            // 25-Misora 瞄准点
+    pj["wounds"] = {{"aura", {s.wound[kWoundAura][0], s.wound[kWoundAura][1]}},
+                    {"flare", {s.wound[kWoundFlare][0], s.wound[kWoundFlare][1]}},
+                    {"life", {s.wound[kWoundLife][0], s.wound[kWoundLife][1]}}};
+    pj["damageTakenThisTurn"] = s.damageTakenThisTurn;
+    // 23-Akina 股市 / 股价 / 本回合算法（公开信息）
+    pj["market"] = s.market;
+    pj["stockPrice"] = s.stockPrice;
+    pj["algorithmThisTurn"] = s.algorithmThisTurn;
+    pj["cashOutThisTurn"] = s.cashOutThisTurn;
+    // 26-Innealra 诺伦: 惑 / 命运槽 / 纠葛 / 共鸣计数（公开信息）
+    pj["waku"] = s.waku;
+    pj["fate"] = json::array();
+    for (int k = 0; k < 4; ++k)
+      pj["fate"].push_back(s.fate[k] >= 0 ? def(s.fate[k]).name : std::string());
+    pj["fatesEntangled"] = s.fatesEntangled;
+    pj["resonanceCountThisTurn"] = s.resonanceCountThisTurn;
+    pj["usedNonInnealraThisTurn"] = s.usedNonInnealraThisTurn;
+    pj["usedNormalThisTurn"] = s.usedNormalThisTurn;
     pj["sets"] = playerSets_[pi];
+    // 19-Megumi: 土壤 / 假想树（回放用完整状态）
+    pj["hasSoil"] = s.hasSoil;
+    pj["seeds"] = s.soilSeeds;
+    pj["plants"] = s.soilPlants;
+    pj["tree"] = s.tree;
+    pj["treeActive"] = s.treeActive;
+    // 20-Kanawe: 地图 / 戏剧（回放用完整状态）
+    pj["node"] = s.node;
+    pj["dramaPrepared"] = s.dramaPrepared;
+    pj["dramaProgressedThisTurn"] = s.dramaProgressedThisTurn;
+    pj["dramaProgressedLastTurn"] = s.dramaProgressedLastTurn;
+    pj["noDramaThisTurn"] = s.noDramaThisTurn;
+    pj["dramas"] = json::array();
+    for (int i : s.dramas) {
+      json e;
+      e["name"] = def_of(i).name;
+      e["slot"] = def_of(i).dramaSlot;
+      e["tag"] = load_int(i, "tag", 0);
+      e["progress"] = load_int(i, "progress", 0);
+      e["tier"] = load_int(i, "tier", 0);
+      pj["dramas"].push_back(e);
+    }
     pj["hand"] = json::array();
     for (int i : s.hand) pj["hand"].push_back(card(i));
     pj["special"] = json::array();
@@ -80,6 +123,7 @@ nlohmann::json Engine::full_state_json() const {
     for (int i : s.enhance) {
       json c = card(i);
       c["crystals"] = ci(i).crystals;
+      c["green"] = ci(i).green;  // 19-Megumi
       pj["enhance"].push_back(c);
     }
     pj["parts"] = json::array();
@@ -88,6 +132,12 @@ nlohmann::json Engine::full_state_json() const {
       c["assembled"] = ci(i).assembled;
       c["core"] = def_of(i).corePart;
       pj["parts"].push_back(c);
+    }
+    pj["barracks"] = json::array();  // 18-Mizuki（完整状态含兵舍）
+    for (int i : s.barracks) {
+      json c = card(i);
+      c["mobilized"] = ci(i).faceUp;
+      pj["barracks"].push_back(c);
     }
     j["players"].push_back(pj);
   }
@@ -232,13 +282,40 @@ uint64_t Engine::state_hash() const {
     putv(p.deck); putv(p.hand); putv(p.discard); putv(p.cover);
     putv(p.enhance); putv(p.special); putv(p.parts); putv(p.bag); putv(p.memory);
     put(p.cardsPlayedTotal); put(p.curse); putb(p.hasCurse); puts(p.extraAttackCostGoddess);
+    putb(p.tailwind); putb(p.forcedTailwind); putb(p.oppAttackedLastTurn); put(p.dive);
+    put(p.aim);  // 25-Misora 瞄准点
+    // 24-Shisui 裂伤指示物（不占位置的公开信息）与本回合受伤次数。
+    for (int a = 0; a < 3; ++a)
+      for (int s = 0; s < 2; ++s) put(p.wound[a][s]);
+    put(p.damageTakenThisTurn);
+    // 23-Akina: 股市 / 股价 / 本回合套现与算法标记
+    put(p.market); put(p.stockPrice); putb(p.algorithmThisTurn); putb(p.cashOutThisTurn);
+    // 26-Innealra: 惑 / 命运槽 / 纠葛 / 本回合共鸣与使用记录
+    put(p.waku);
+    for (int k = 0; k < 4; ++k) put(p.fate[k]);
+    putb(p.fatesEntangled); put(p.resonanceCountThisTurn);
+    putb(p.usedNonInnealraThisTurn); put(p.usedNormalThisTurn);
+    putb(p.cannotUseNormals); putb(p.cannotRetreat); putb(p.nextRebuildFreeze);
+    // 18-Mizuki: 兵舍 / 阵地 / 对应计数
+    putv(p.barracks); putb(p.distChanged); putb(p.respondedThisTurn);
+    putb(p.respondedLastTurn); put(p.attackCardsPlayedThisTurn);
+    put(p.normalAttacksThisTurn); put(p.responsesPlayedThisTurn);
+    // 19-Megumi: 土壤 / 假想树
+    putb(p.hasSoil); put(p.soilSeeds); put(p.soilPlants); putv(p.tree);
+    putb(p.treeActive); put(p.nextGrowth);
+    // 20-Kanawe: 地图 / 戏剧
+    puts(p.node); put(p.dramaPrepared); putb(p.dramaProgressedThisTurn);
+    putb(p.dramaProgressedLastTurn); putb(p.noDramaThisTurn); putv(p.dramas);
+    // 22-Renri: 本回合质疑失败标记
+    putb(p.doubtFailedThisTurn);
   }
 
   for (const CardInstance& c : st.insts) {
     put(c.inst); put(c.def); put(static_cast<int>(c.owner)); put(static_cast<int>(c.holder));
     put(static_cast<int>(c.zone));
     putb(c.faceUp); putb(c.assembled); putb(c.usedThisTurn); put(c.crystals);
-    put(c.sealedBy); put(c.bagOwner); putv(c.sealed);
+    put(c.green);
+    put(c.sealedBy); put(c.bagOwner); putv(c.sealed); putb(c.soldier);
   }
 
   // Per-turn event bookkeeping (all "first time this turn" triggers).
@@ -249,8 +326,17 @@ uint64_t Engine::state_hash() const {
     putb(playedLianchengThisTurn_[i]); putb(didBasicThisTurn_[i]);
     putb(rebuiltThisTurn_[i]); putb(usedFullPowerThisTurn_[i]);
     putb(revealOppSpecials_[i]); putb(ashuraExtraUsed_[i]);
+    put(generatedAttacks_[i]); put(enemyLifeDamageFired_[i]); put(enemyAuraDamageFired_[i]);
+    putb(lifeChangedThisTurn_);
+    put(lifeChangeMaxThisTurn_);
+    put(crystalBatchAny_);
+    put(crystalBatchNonCard_);
+    put(cardCrystalMovesThisTurn_);
+    putb(pendingAdvance_[i]);
+    putb(pendingAdvanceTier_[i]);
   }
   put(distanceAtTurnStart_);
+  put(distanceBaseline_);
   putb(zenkaiActive_);
   putb(poisonForce_);
   put(pendingNagiAdjust_);
@@ -258,7 +344,26 @@ uint64_t Engine::state_hash() const {
   putb(keisouDoubled_);
   putb(forceUnrespondable_);
   put(externalAdded_);
+  // 26-Innealra: 瞬态结算状态（命运槽解析 / 伤害去向 / 被对应标记）
+  put(fateResolvingSlot_);
+  putb(fateFromTurnStart_);
+  putb(damageToWaku_);
+  put(static_cast<int>(damageToWakuPlayer_));
+  putb(damageToAuraDistance_);
+  putb(lastAtkResponded_);
+  putb(inBasicAction_);
+  put(static_cast<int>(basicActor_));
   put(static_cast<int>(effects_->pending_mod_count()));
+  // 22-Renri 夜山恋离: 伪证 / 回归 / 复制 的瞬态状态
+  put(pendingResolveAs_);
+  put(resolveOverrideInst_);
+  putb(bluffActive_);
+  put(bluffInst_);
+  put(bluffClaimDef_);
+  putb(bluffNotDoubted_);
+  putb(bluffDoubtFailed_);
+  putb(crystalLeftDustThisTurn_);
+  put(crystalMover_);
   put(static_cast<int>(vars_.size()));
   for (const auto& [key, value] : vars_) {
     put(key.first);
@@ -296,8 +401,35 @@ nlohmann::json Engine::observation(Player v) const {
     pj["cower"] = s.cower;
     pj["cannotRespond"] = s.cannotRespond;
     pj["cardsPlayedThisTurn"] = s.cardsPlayedThisTurn;
+    pj["tailwind"] = s.tailwind;       // 顺风/逆风为公开信息
+    pj["oppAttackedLastTurn"] = s.oppAttackedLastTurn;
+    pj["diving"] = s.dive != 0;        // 是否处于潜水状态
+    if (pi == static_cast<int>(v)) pj["dive"] = s.dive;  // 前进/后退的选择对对手保密
+    pj["aim"] = s.aim;                 // 25-Misora 瞄准点（公开信息）
+    // 24-Shisui: 裂伤指示物不占位置、可以出现在任意一方的装/气/命，均为公开
+    // 信息；数组下标 = 造成该裂伤的来源玩家。
+    pj["wounds"] = {{"aura", {s.wound[kWoundAura][0], s.wound[kWoundAura][1]}},
+                    {"flare", {s.wound[kWoundFlare][0], s.wound[kWoundFlare][1]}},
+                    {"life", {s.wound[kWoundLife][0], s.wound[kWoundLife][1]}}};
+    pj["damageTakenThisTurn"] = s.damageTakenThisTurn;  // 公开信息
+    // 23-Akina 股市 / 股价（公开信息）；资本仅对安琪娜玩家有意义。
+    pj["market"] = s.market;
+    pj["stockPrice"] = s.stockPrice;
+    pj["algorithmThisTurn"] = s.algorithmThisTurn;
+    pj["capital"] = capital(p);
+    // 26-Innealra 诺伦: 惑 / 命运槽内容 / 纠葛 / 共鸣计数（均为公开信息）
+    pj["waku"] = s.waku;
+    {
+      json fates = json::array();
+      for (int k = 0; k < 4; ++k)
+        fates.push_back(s.fate[k] >= 0 ? def(s.fate[k]).name : std::string());
+      pj["fates"] = fates;
+    }
+    pj["fatesEntangled"] = fates_entangled(p);
+    pj["resonanceCountThisTurn"] = s.resonanceCountThisTurn;
     pj["umbrella"] = s.umbrella;
     pj["yukihi"] = s.yukihi;
+    pj["doubtFailedThisTurn"] = s.doubtFailedThisTurn;  // 22-Renri（公开信息）
     if (pi == static_cast<int>(v) || s.strategyKnown) pj["strategy"] = s.strategy;
     pj["sets"] = playerSets_[pi];
     pj["handCount"] = static_cast<int>(s.hand.size());
@@ -319,6 +451,7 @@ nlohmann::json Engine::observation(Player v) const {
       e["inst"] = inst;
       e["name"] = def_of(inst).name;
       e["crystals"] = ci(inst).crystals;
+      e["green"] = ci(inst).green;  // 19-Megumi
       enh.push_back(e);
     }
     pj["enhance"] = enh;
@@ -331,6 +464,7 @@ nlohmann::json Engine::observation(Player v) const {
         e["inst"] = inst;
         e["name"] = def_of(inst).name;
         e["used"] = c.faceUp;
+        if (c.green > 0) e["green"] = c.green;  // 19-Megumi: 牌上绿色结晶为公开信息
       } else {
         e["hidden"] = true;
       }
@@ -341,6 +475,42 @@ nlohmann::json Engine::observation(Player v) const {
     json bag = json::array();
     for (int inst : s.bag) bag.push_back(def_of(inst).name);
     pj["bag"] = bag;
+    // 18-Mizuki 兵舍: 士兵的构成与是否已动员都是公开信息。
+    json bq = json::array();
+    for (int inst : s.barracks) {
+      json e;
+      e["owner"] = pi;
+      e["inst"] = inst;
+      e["name"] = def_of(inst).name;
+      e["mobilized"] = ci(inst).faceUp;
+      bq.push_back(e);
+    }
+    pj["barracks"] = bq;
+    pj["barracksMobilized"] = barracks_mobilized_count(p);
+    pj["position"] = !s.distChanged;  // 阵地：本回合距离是否未变
+    // 19-Megumi 土壤 / 假想树：双方均为公开信息。
+    pj["hasSoil"] = s.hasSoil;
+    pj["seeds"] = s.soilSeeds;
+    pj["plants"] = s.soilPlants;
+    pj["treeActive"] = s.treeActive;
+    json tr = json::array();
+    for (int v : s.tree) tr.push_back(v);
+    pj["tree"] = tr;
+    // 20-Kanawe 地图 / 戏剧：双方均为公开信息（实体版地图与戏剧栏都摆在桌上）。
+    pj["node"] = s.node;
+    json dr = json::array();
+    for (int i : s.dramas) {
+      json e;
+      e["inst"] = i;
+      e["slot"] = def_of(i).dramaSlot;
+      e["name"] = def_of(i).name;
+      e["tag"] = load_int(i, "tag", 0);            // 0 未完成 / 1 戏剧栏 / 2 已完成
+      e["progress"] = load_int(i, "progress", 0);
+      e["tier"] = load_int(i, "tier", 0);
+      e["prepared"] = (i == s.dramaPrepared);
+      dr.push_back(e);
+    }
+    pj["dramas"] = dr;
     if (pi == static_cast<int>(v)) {
       json parts = json::array();
       for (int inst : s.parts) {

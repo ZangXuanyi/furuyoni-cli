@@ -171,12 +171,20 @@ TEST_CASE("rules docs and content agree on every static attack") {
                          "rules/03-himika.md",   "rules/04-tokoyo.md", "rules/05-oboro.md",
                          "rules/06-yukihi.md",   "rules/07-shinra.md", "rules/08-hagane.md",
                          "rules/09-chikage.md",  "rules/10-kururu.md", "rules/11-thallya.md",
-                         "rules/12-raira.md"};
+                         "rules/12-raira.md",    "rules/13-utsuro.md", "rules/14-honoka.md",
+                         "rules/15-konuru.md",   "rules/16-yatsuha.md", "rules/17-hatsumi.md",
+                         "rules/18-mizuki.md",   "rules/19-megumi.md", "rules/20-kanawe.md",
+                         "rules/21-kamuwi.md",   "rules/22-renri.md",  "rules/23-akina.md",
+                         "rules/24-shisui.md",   "rules/25-misora.md", "rules/26-innealra.md"};
   int checked = 0, skipped = 0;
   for (const char* rf : files) {
     std::string rpath = find_file(rf);
     std::string cpath = find_file(content_for_rules(rf));
     if (cpath.empty() || rpath.empty()) continue;
+    {  // 尚未实现的柱（有规则文件但还没内容）跳过
+      std::ifstream probe(cpath);
+      if (!probe) continue;
+    }
     Engine e;
     e.load_content(cpath);
     for (const std::string& raw : read_lines(rpath)) {

@@ -15,6 +15,22 @@
 
 namespace fy {
 
+// 25-Misora 追踪: the attack's distance check reads the attacker's 瞄准点 instead
+// of the current distance (see Engine::attack_range_ok). Declared here (not in
+// types.hpp) so that only the Misora feature owns this bit.
+inline constexpr uint32_t AF_Tracking = 1u << 12;
+
+// 24-Shisui 裂伤: the attack's X/Y values become wound markers 【{X/Y}】 instead of
+// regular damage (resolved as 裂伤指示物; see Engine::apply_wound_attack_damage).
+inline constexpr uint32_t AF_Wound = 1u << 13;
+
+// 26-Innealra 诺伦: 残恣·嗜灭 —— 只把「对装伤害」本应进入虚的结晶改为进入距
+// （区别于 AF_ToDistance 的「倒车」，后者对命伤同样生效）。
+inline constexpr uint32_t AF_AuraToDistance = 1u << 14;
+// 26-Innealra 诺伦: 星空 / 宇宙·幽邃 —— 本次攻击造成伤害时，本应移动的樱花结晶
+// 移到攻击者的「惑」。
+inline constexpr uint32_t AF_ToWaku = 1u << 15;
+
 // A cross-goddess deck-building ban (village rule / official restriction):
 // when a player picked both goddesses a and b, the card named `card` cannot be
 // included in their build.
@@ -82,9 +98,12 @@ struct Attack {
   int sourceDefOverride = -1;      // 祟神复制: 女神/通常/切札 判定用的来源 def
   bool counted = false;            // already counted toward 每回合攻击次数
   bool attackerChoosesDamage = false;  // 畏掠
+  bool lifeDamageToDust = false;   // 强酸: 因命伤移动的结晶进入虚而非敌气
   bool negated = false;       // 打消
   bool missed = false;        // range re-check failed
   bool hit = false;
+  bool generated = false;     // 20-Kanawe: 牌效生成的衍生攻击（不受黄格 +0/+1）
+  bool wound = false;         // 24-Shisui 裂伤攻击: X/Y 变为 {X/Y} 裂伤指示物
 };
 
 class EffectHost;
@@ -162,8 +181,12 @@ class Engine {
   void draw(Player p, int n);
   void gain_vigor(Player p, int n);
   void give_cower(Player p);
+  // 22-Renri: 焦躁（抽牌失败等）——受 道化的觉悟 影响时伤害变为 2/1。
+  void impatience(Player target);
   void lose_life(Player p, int n, bool triggerBreak = true);
-  void damage_life(Player target, int n, AreaKind to, bool triggerBreak, int toCard = -1);
+  // toOwner >= 0 时覆盖目的地持有者（26-Innealra 惑：命伤结晶进入攻击者的惑）。
+  void damage_life(Player target, int n, AreaKind to, bool triggerBreak, int toCard = -1,
+                   int toOwner = -1);
   void deal_damage(Player target, std::optional<int> aura, std::optional<int> life,
                    uint32_t keywords = 0);
   void rebuild(Player p, bool costLife);
@@ -179,6 +202,39 @@ class Engine {
   void consume_enhance_crystal(int inst);
   void check_win();
 
+  // ---- 20-Kanawe 叶慧: 地图 / 戏剧 ------------------------------------------
+  // 当前节点的剧目数值 / 颜色（-1 无 / 0 红 / 1 紫 / 2 绿 / 3 黄）。
+  int node_value(Player p) const;
+  int node_color(Player p) const;
+  std::string node_name(Player p) const { return ps(p).node; }
+  void init_dramas(Player p);                     // 开局：6 张戏剧入戏剧区
+  int prepared_drama(Player p) const { return ps(p).dramaPrepared; }
+  // 准备下一幕戏剧；allowCompleted = 可以从已完成堆中选择（杀青全开 / 疾书弗尽）。
+  // 返回是否选择了「已完成过」的戏剧（疾书弗尽据此移出游戏）。
+  bool prepare_drama(Player p, bool allowCompleted);
+  // 结算所有玩家已准备戏剧的条件（atTurnEnd 时才判定《定位》）。
+  void check_dramas(bool atTurnEnd = false);
+  // 在安全点结算「完成戏剧 → 前进一格」（由 decide() 与回合结束调用）。
+  void flush_drama_advances();
+  // 完成戏剧后由玩家选择前进的节点；upgraded 时额外开放「可试炼到」的分支。
+  bool advance_node(Player p, bool upgraded);
+  void resolve_node_reward(Player p);             // 落格奖励（按颜色）
+  void forced_basic(Player p);                    // 剧效: 执行一次基本动作
+  bool drama_progressed_last_turn(Player p) const { return ps(p).dramaProgressedLastTurn; }
+  void set_no_drama_this_turn(Player p) { ps(p).noDramaThisTurn = true; }
+  // 黄格光环: 站在黄色地点的玩家的非衍生攻击 +0/+1。
+  void apply_node_attack_bonus(Player p, Attack& a) const;
+  // 封杀: 对手不能使用与宣言牌名相同的切牌。
+  bool cut_name_banned(Player p, int inst) const;
+  int declare_cut_ban(Player p, int inst);
+  void remove_from_game(int inst);                // 移出游戏（O-S4）
+  std::vector<int> unchosen_normals(Player p) const;   // 构筑时未获得的常规牌
+  std::vector<int> unchosen_specials(Player p) const;  // 构筑时未获得的切牌
+  void gain_unchosen_normal(Player p, int inst);
+  void gain_unchosen_cut(int inst);
+  void play_hand_card_response(Player p, int inst);    // 即兴: 从手牌作对应打出
+  int attacks_and_responses_this_turn() const;
+
   // ---- extended mechanics --------------------------------------------------
   int effective_armor(Player p) const;   // 实装 + “视作装”的卡上结晶
   void spend_aura(Player target, int n);  // consume “视作装”结晶 first, then real aura
@@ -187,13 +243,126 @@ class Engine {
   int effective_hand_limit(Player p) const;          // 盖伏保留上限
   bool playable_card(Player p, int inst);            // playable-in-main predicate (e.g. 决死限定)
   bool respondable_card(Player p, int inst);         // response capability (含识破/终焉)
+  // 「限制距离X-Y」= 打出时当前距必须落在 [X,Y]（同类攻击的距离限制）。
+  bool limit_distance_ok(const CardDef& d) const;
   bool basic_legal(Player p, BasicAction a) const;
   bool do_basic(Player p, BasicAction a);            // free basic action (no vigor/cover)
   void free_basics(Player p, int maxTimes);
   void free_basics_of(Player p, int maxTimes, const std::vector<std::string>& allowed);
-  Attack make_attack(Player p, int inst, bool asResponse, bool consumePending);
+  Attack make_attack(Player p, int inst, bool asResponse, bool consumePending,
+                     bool declareNow = true);
   bool any_lock_distance() const;
   void reveal_hand(Player p);
+  // 25-Misora 追踪: a tracking attack is judged against the attacker's 瞄准点
+  // (and cannot be declared at all without one). Otherwise == range.contains(distance()).
+  bool attack_range_ok(const Attack& a) const;
+  // 25-Misora 瞄准点: -1 = 不存在。
+  int aim(Player p) const { return ps(p).aim; }
+  void set_aim(Player p, int v) { ps(p).aim = v < 0 ? -1 : v; }
+  // 玩家是否寄宿观空（决定回合结束是否可以记录瞄准点）。
+  bool has_misora(Player p) const;
+
+  // ---- 24-Shisui 桑畑志水: 裂伤 -------------------------------------------------
+  // 玩家是否寄宿志水（决定准备阶段开始时是否结算裂伤）。
+  bool has_shisui(Player p) const;
+  // 向 target 的 area（kWoundAura/kWoundFlare/kWoundLife）放置 n 个由 source
+  // 造成的裂伤指示物。命区域的同源裂伤数 > 命时立即只伤害化该组。
+  void add_wound(Player target, int area, int n, Player source);
+  // 该区域的裂伤数（source < 0 = 两个来源合计）。
+  int wound_count(Player target, int area, int source = -1) const;
+  // 把「target 的 area 中来自 source 的所有裂伤」作为 1 次伤害结算
+  // （装→虚 / 气→虚 / 命→气）。返回实际伤害化的裂伤数。
+  int resolve_wound_group(Player target, int area, Player source);
+  // 结算 target 的某区域内所有来源的裂伤（O-S1: 玩家选定的区域）。
+  void resolve_wound_area(Player target, int area);
+  // 准备阶段开始时：把双方场上所有裂伤以任意顺序伤害化。每个来源玩家自行决定
+  // 自己的裂伤区域之间的结算顺序（active 先于对手）。
+  void resolve_all_wounds(Player active);
+  // 裂伤攻击的承伤选择：与常规 X/Y 相同的选择流程，但只放置裂伤指示物
+  // （不移动装结晶），承伤可用性比较 target 的实际装结晶数。
+  void apply_wound_attack_damage(Player target, Player source, std::optional<int> aura,
+                                 std::optional<int> life, int chooser);
+  // 一次实际伤害（含裂伤伤害化）: 计入「本回合受到伤害的次数」并检查即再起。
+  void note_damage_taken(Player target, Player source, int area);
+  // 检查 kind == immediate 的即再起（不依赖单次命伤量的谓词）。
+  void check_immediate_resets(Player p);
+  int damage_taken_this_turn(Player p) const { return ps(p).damageTakenThisTurn; }
+  // 埋骨地: p 是否有「你不会死亡」的展开中光环。
+  bool no_death(Player p) const;
+  // 集中力的有效值（埋骨地持有者命为 0 时，对手的集中力视为 0）。
+  int effective_vigor(Player p) const;
+  // 支付切札费用（含 [woundCost] = 向自气放置裂伤指示物）。
+  void pay_special_cost(Player p, int inst);
+
+  // ---- 23-Akina 源上安琪娜: 资本 / 股价 / 投资 / 套现 ---------------------------
+  // 玩家是否寄宿安琪娜（决定其股市是否计入资本）。
+  bool has_akina(Player p) const;
+  // 资本 = 该玩家的装 + 气 + 股市结晶数；不控制安琪娜的玩家股市视作 0。
+  int capital(Player p) const;
+  int stock_price(Player p) const { return ps(p).stockPrice; }
+  // 股价增减（结果 clamp 到 [1,4]）。
+  void add_stock(Player p, int n);
+  // 攻击的命伤结算后调整双方安琪娜玩家的股价（敌方命伤 +2 / 我方命伤 -1）。
+  void note_attack_life_damage(Player target, bool fromAttack, int amount);
+  // 套现：需要股市 >= 1 个结晶。返回是否实际执行。
+  bool can_cash_out(Player p) const { return ps(p).market >= 1; }
+  void cash_out(Player p);
+  // 投资：选择一张投资券翻至背面向上并支付投资资金，然后股价 +1。
+  // 没有可翻的投资券或对应区域不足时返回 false（不做任何事）。
+  bool invest(Player p);
+  bool invest_available(Player p) const;
+  // O-S4 正解「使用后」：每回合开始时可用 1 自装到自气替代套现操作。
+  bool answer_aura_active(Player p) const;
+  // 回合开始时的套现窗口（含正解的替代）。
+  void akina_turn_start(Player p);
+  // 回合结束且本回合内没有套现时的投资窗口。
+  void akina_end_of_turn(Player p);
+  // O-N5 算法：本回合内所有攻击获得距离扩大（近1）与距离缩小（远1）。
+  bool algorithm_active() const;
+  void apply_algorithm(Attack& a) const;
+  // O-S1 差列递归: 资本 > 对手时必须再使用一次（照常支付费用）。
+  void maybe_force_reuse(Player p, int inst);
+  // 死亡窗口（O-S3 仙霄鬼泉天元术「当你死亡时」）：返回该玩家是否被救回。
+  bool run_death_saves(Player p);
+
+  // ---- 26-Innealra 诺伦: 命运槽 / 共鸣 / 纠葛 / 惑 ---------------------------
+  // 玩家是否寄宿诺伦（三把枪的任一形态）。
+  bool has_innealra(Player p) const;
+  // 牌的形态过滤：命中 form 或 forms 列表中的任意一项。
+  bool form_matches(const CardDef& d, const std::string& f) const;
+  // 开局按规则书写顺序把四个命运放入命运槽（过去/现在/未来/待启）。
+  void init_fates(Player p, const std::string& form);
+  int fate_slot(Player p, int i) const;               // 槽 i 的 def id（-1 = 空）
+  int fate_pos(Player p, const std::string& name) const;  // 该命运的当前槽（-1 = 无）
+  // 轮转：过去→待启、现在→过去、未来→现在、待启→未来。
+  void rotate_fates(Player p);
+  // 当前寄宿的枪对应的时间点槽：O→0 / A1→1 / A2→2。
+  int resonance_time_slot(Player p) const;
+  // 执行槽 i 的命运效果（不轮转）。fromTurnStart = 由「回合开始时抽牌后」的共鸣触发。
+  void resolve_fate_slot(Player p, int i, bool fromTurnStart);
+  // 共鸣：执行当前时间点槽的命运，然后轮转命运槽，并计入本回合共鸣次数。
+  void resonance(Player p, bool fromTurnStart);
+  void entangle_fates(Player p, bool v) { ps(p).fatesEntangled = v; }
+  // 纠葛：万劫缠迫展开中（显式标记或场上有 fateEntangler 的生效牌）。
+  bool fates_entangled(Player p) const;
+  int resonance_count(Player p) const { return ps(p).resonanceCountThisTurn; }
+  bool used_non_innealra(Player p) const { return ps(p).usedNonInnealraThisTurn; }
+  // 记录一次「使用牌」（非诺伦牌标记 + 通常牌计数）。
+  void note_card_used_by(Player p, const CardDef& d);
+  // 对手使用全力牌 / 对应牌时，询问该玩家是否轮转一次（不共鸣）。
+  void offer_fate_rotation(Player p, const std::string& why);
+  // 脆弱意志: 获得结晶的玩家的对手是否有生效中的脆弱意志（返回实例）。
+  int fragile_will_host(Player gainer) const;
+  // 阴郁·埋葬: 攻击者的对手是否有「对手的攻击不受攻击修正」的生效牌。
+  bool suppress_attack_mods(Player attacker) const;
+  // 使用切札时实际支付的费用（气→虚）与「把费用移到惑」。
+  int cost_paid(int inst) const { return load_int(inst, "paid_cost", 0); }
+  int cost_to_waku(Player p, int inst);
+  void set_rebuild_freeze(Player p) { ps(p).nextRebuildFreeze = true; }
+  // 正在结算的命运槽 / 是否来自回合开始（ctx 读取用）。
+  int fate_resolving_slot() const { return fateResolvingSlot_; }
+  bool fate_from_turn_start() const { return fateFromTurnStart_; }
+  bool last_attack_responded() const { return lastAtkResponded_; }
 
   // ---- Phase 3 extensions --------------------------------------------------
   int used_special_count(Player p, const std::string& goddess) const;  // 正面向上切札数
@@ -210,6 +379,16 @@ class Engine {
   // Unlike last_damage_* this is cleared for every attack, so 攻击后 effects do
   // not read a stale value when the attack dealt no damage (e.g. 驳论).
   int last_attack_side() const { return lastAtkSide_; }
+  // 准备阶段的结算（回合开始：付与 -1 / 重铸 / 抽牌）；公开以便测试。
+  void start_phase(Player p);
+  // 结束阶段（再起条件 / 结束触发）；公开以便测试。
+  void end_phase(Player p);
+  // 25-Misora 观空：主要阶段结束时（若本回合进行过攻击）移除瞄准点；公开以便测试。
+  void clear_aim_if_attacked(Player p);
+  // 25-Misora 观空：回合结束时询问是否把当前距记录为瞄准点；公开以便测试。
+  void offer_aim_recording(Player p);
+  // 重铸牌库流程（含「设置」/电子设置/22-Renri「谎言的武器」的宣称）；公开以便测试。
+  void run_rebuild(Player p);
   int last_attack_amount() const { return lastAtkAmount_; }
   void store_int(int inst, const std::string& key, int v);   // per-card scratch (神座渡 X)
   int load_int(int inst, const std::string& key, int def = 0) const;
@@ -250,8 +429,42 @@ class Engine {
   void decay_crystals(int inst, int n);
   void remove_all_normals(Player p);                  // 残响装置: 移除所有非切牌
   void skip_next_main(Player p) { ps(p).skipMainPhase = true; }
-  void add_temp_distance(Player p, int n) { ps(p).tempDistanceMod += n; }
+  void add_temp_distance(Player p, int n) {
+    if (n != 0) note_distance_changed();  // 18-Mizuki 阵地（有效距离变化）
+    ps(p).tempDistanceMod += n;
+  }
   void add_temp_near_distance(Player p, int n) { ps(p).tempNearDistanceMod += n; }
+  // ---- 18-Mizuki: 动员 / 兵舍 / 阵地 / 词条改写 -----------------------------
+  bool is_soldier(int inst) const;                    // 士兵（含 O-S3 加入的手牌）
+  bool soldier_mobilized(int inst) const { return ci(inst).faceUp; }  // 已动员
+  int barracks_mobilized_count(Player p) const;
+  void leave_barracks(Player p, int inst);
+  void to_barracks(Player p, int inst, bool mobilized);
+  int mobilize(Player p);                             // 动员 1 张（返回实例，无可动员则 -1）
+  int gain_soldier(Player p, const std::string& name);  // 追加牌以已动员态入兵舍
+  void hand_to_barracks(Player p, int inst);            // O-S3: 手牌以已动员态入兵舍
+  // 阵地：本回合内有效距离没有改变过（达人距离不算）。
+  bool position(Player p);
+  bool responded_last_turn(Player p) const { return ps(p).respondedLastTurn; }
+  int attack_cards_played(Player p) const { return ps(p).attackCardsPlayedThisTurn; }
+  int normal_attacks_this_turn(Player p) const { return ps(p).normalAttacksThisTurn; }
+  int responses_played(Player p) const { return ps(p).responsesPlayedThisTurn; }
+  bool first_response_played() const;                 // 当前正在结算的对应是否为本回合第一张
+  bool terminal_rewrite_active(Player p) const;       // O-S4
+  bool has_terminal(int inst) const;                  // 含 O-S4 改写
+  bool has_full_power(int inst) const;                // 含 O-S4 改写
+  void note_distance_changed();
+  // ---- 17-Hastumi: 航海 / 潜水 / 罗盘 --------------------------------------
+  bool tailwind(Player p) const { return ps(p).tailwind; }
+  int dive_state(Player p) const { return ps(p).dive; }
+  // 航海: 回合开始时判定顺风。必须在每回合的计数重置之前调用（play_turn 开头）。
+  void begin_tailwind(Player p);
+  // 潜水：声明前进(1)/后退(2)。已处于潜水状态时什么都不做。
+  void declare_dive(Player p, int kind);
+  // 公开潜水并解除：应用“本回合内距离/达人距离 ±1”。byAttack 表示由攻击牌触发。
+  bool reveal_dive(Player diver, bool byAttack);
+  int compass_count(Player p) const;          // 罗盘有效数（含已使用切札付与）
+  void apply_compass(Attack& a) const;        // 罗盘位移：追加/删除离散值 5
   std::string card_zone(int inst) const;
   void use_from_cover(int inst, bool asResponse);     // 分身/鸢影: use a cover card
   void force_unrespondable() { forceUnrespondable_ = true; }
@@ -260,6 +473,29 @@ class Engine {
   int external_added() const { return externalAdded_; }
   void init_parts(Player p);              // give Oboro A2 its parts pool
   void init_bag(Player p);                // give Chikage its 毒袋
+
+  // ---- 22-Renri 夜山恋离: 伪证 / 回归 / 铭镌之衣 -----------------------------
+  // 可以声称的伪证牌 def（本格 5 张；A1 追加 3 张史前遗物）。
+  std::vector<int> bluff_claim_defs(Player p) const;
+  // 当前结算的这张牌是否是一次伪证 / 对手是否质疑 / 质疑是否失败。
+  bool bluff_active() const { return bluffActive_; }
+  bool bluff_undoubted() const { return bluffNotDoubted_; }
+  bool bluff_doubt_failed() const { return bluffDoubtFailed_; }
+  bool bluff_is_real() const;             // 实际牌名 == 声称的牌名
+  int bluff_inst() const { return bluffInst_; }
+  std::string bluff_claim_name() const;
+  // 让正在结算的这张牌按另一张牌（复制 / 洛阳铲的声称）结算。
+  bool resolve_as(int inst, const std::string& name);
+  // 对手构筑阶段能够选择的常规非付与牌名（洛阳铲）。
+  std::vector<std::string> opponent_build_normals(Player p) const;
+  // 对手是否从手牌/盖牌堆/弃牌堆展示该名称的牌（洛阳铲的使用失败判定）。
+  bool opponent_shows_name(Player p, const std::string& name) const;
+  int def_cost_by_name(const std::string& name) const;  // -1 = 内容中没有该牌
+  bool crystal_left_dust_this_turn() const { return crystalLeftDustThisTurn_; }
+  // 正在移动结晶的玩家（终幕: 对手不能移动这张牌上的樱花结晶）。
+  void set_crystal_mover(Player p) { crystalMover_ = static_cast<int>(p); }
+  void clear_crystal_mover() { crystalMover_ = -1; }
+  // ---- 22-Renri 结束 --------------------------------------------------------
 
   // ---- Yukihi: 变貌 (weapon 伞/簪) -----------------------------------------
   bool umbrella(Player p) const { return ps(p).umbrella; }
@@ -347,12 +583,56 @@ class Engine {
   bool has_memory_draw(Player p) const;
   bool has_memory_shield(Player p) const;
   int lose_external(AreaRef a, int n);        // 把结晶移到游戏外
+  // ---- 19-Megumi 泷河希: 耕种 / 土壤 / 假想树 --------------------------------
+  // 移除牌上结晶时的语境（决定「不能被移除」限制是否豁免）。
+  enum CrystalTakeMode {
+    kTakeNormal = 0,   // 效果移除：受 crystalImmune / keepCrystalsOnOppTurn 限制
+    kTakeSustain = 1,  // 每回合开始的固定 -1：豁免限制
+    kTakeOwn = 2,      // 本牌自身的结算：豁免限制
+    kTakeLeaving = 3,  // 牌离场：豁免限制
+  };
+  void init_soil(Player p);                   // 开局：5 个种子 + 6 格假想树
+  void cultivate(Player p);                   // 打出付与牌：1 种子 -> 植株
+  int growth_of(Player p, int inst) const;    // 本牌的实际 生长X（含脱粒的临时词条）
+  void grow_enhance(Player p, int inst);      // 询问并至多移动 X 个植株到该牌上
+  int green_of(int inst) const { return ci(inst).green; }
+  int card_crystal_count(int inst) const;     // 樱花 + 绿色（“视作樱花结晶”）
+  int total_green_on_enhances(Player p) const;
+  int green_zones(Player p) const;            // 有绿色结晶的区域数（土壤/付与区/假想树）
+  int green_total(Player p) const;            // 守恒自检：种子+植株+树+牌上绿色
+  // 移除牌上结晶的统一切口：先樱花、后绿色；绿色回种子/假想树。
+  // mode: 0 普通（受“不能被移除”限制）/ 1 维持（豁免限制）/ 2 本牌自身效果（豁免）/ 3 离场。
+  // sakuraOut 返回实际移除的樱花数（由调用者负责归置）；绿色自动回家。
+  int take_card_crystals(int inst, int n, int mode, int* sakuraOut);
+  int remove_card_crystals(int inst, int n);  // 普通模式（樱花 -> decay，绿色 -> 回家）
+  void seed_to_plant(Player p, int n);        // 至多 n 个种子 -> 植株（返回实际数见返回值）
+  int attach_green(int inst, int n);          // 植株 -> 该牌的绿色（返回实际数）
+  int detach_green_to_seeds(int inst, int n); // 该牌的绿色 -> 种子（不经假想树）
+  void green_home(Player p);                  // 1 个绿色回假想树（若在游戏中）否则回种子
+  bool tree_active(Player p) const { return ps(p).treeActive; }
+  int tree_slot(Player p, int i) const;
+  int tree_occupied(Player p) const;
+  std::vector<int> tree_legal_slots(Player p) const;
+  int tree_place_one(Player p);               // 选择合法空格放置 1 个种结晶（-1 = 无处）
+  int tree_place_from_soil(Player p);         // 种子 -> 假想树（A1-S4）
+  void tree_fall(Player p, int n);            // 从下往上脱落 n 个种结晶回土壤（散华时）
+  void set_next_growth(Player p, int x) { ps(p).nextGrowth = x; }
+  int crystal_redirect_host(Player p, int except) const;
+  bool is_borrowed(int inst) const { return ci(inst).holder != ci(inst).owner; }
+  int card_owner(int inst) const { return static_cast<int>(ci(inst).owner); }
+  // 3-2 散华时: 公开使用一张未选择的切牌，然后移出游戏。
+  std::vector<int> unchosen_cuts(Player p) const;
+  void tree_use_cut(Player p, int inst);
+  bool used_generated_attack(Player p) const { return generatedAttacks_[p] > 0; }
+  void note_generated_attack(Player p) { generatedAttacks_[p] += 1; }
   bool can_upgrade(int inst) const;   // 完全态: 这张牌有升级版
   bool upgrade_card(int inst);        // 完全态: 就地升级（保留所在区域）
   void thaw(Player p, int n) { ps(p).ice = std::max(0, ps(p).ice - n); }
   int ice_count(Player p) const { return ps(p).ice; }
   void redirect_damage_to_card(int inst) { pendingDamageToCard_ = inst; }
-  bool has_damage_immunity(Player p) const;
+  // 22-Renri 铭镌之衣: 「使用后」光环可以是动态的（视作夙愿时才免疫伤害），
+  // 因此这个查询需要调用 Lua，不能是 const。
+  bool has_damage_immunity(Player p);
   int absorb_aura_host(Player p) const;  // 双掌生花: an active card that absorbs 装附
   bool is_poison(int inst) const { return def_of(inst).isPoison; }
   std::vector<int> poison_bag(Player p) const { return ps(p).bag; }
@@ -419,6 +699,23 @@ class Engine {
   bool abortMain_ = false;
   int pendingDamageToCard_ = -1;  // 在此旗: set on_play, snapshotted by make_attack
   int damageToCard_ = -1;         // consumed by apply_damage_to
+  bool damageToDust_ = false;     // 强酸: 本次命伤的结晶进入虚
+  // ---- 22-Renri 夜山恋离 ----------------------------------------------------
+  int pendingResolveAs_ = -1;     // 本次结算改用这个 def（伪装 / 复制）
+  int resolveOverrideInst_ = -1;  // 正在按其它 def 结算的实例（防止递归）
+  bool bluffActive_ = false;      // 当前结算的这张牌是一次伪证
+  int bluffInst_ = -1;            // 用于伪证的实例
+  int bluffClaimDef_ = -1;        // 声称的牌 def
+  bool bluffNotDoubted_ = false;  // 对手没有质疑
+  bool bluffDoubtFailed_ = false; // 对手质疑失败（牌名与声称一致）
+  bool crystalLeftDustThisTurn_ = false;  // 本回合有樱花结晶离开虚（罗织）
+  int crystalMover_ = -1;         // 正在移动结晶的玩家（终幕：对手不能移动）
+  bool inDeathWindow_ = false;    // 23-Akina O-S3: 防止死亡触发递归
+  bool inForceReuse_ = false;     // 23-Akina O-S1: 防止强制再使用递归
+  bool inDamageImmuneQuery_ = false;  // 防止 damage_immune_aura 递归查询
+  // 伪证声明 + 质疑。返回 0 = 没有伪证, 1 = 按声称结算, 2 = 质疑成功（无效）。
+  int declare_bluff(Player p, int inst);
+  void init_start_used(Player p);  // 游戏开始时置于使用后状态的切札
   int lastAtkSide_ = 0;      // side the last resolved attack dealt (0 = none)
   int lastAtkAmount_ = 0;
   int lastDmgSide_ = 0;      // 0 none, 1 aura, 2 life
@@ -443,6 +740,8 @@ class Engine {
   bool auraDamagedThisTurn_[2] = {false, false};
   int normalNonYukihi_[2] = {0, 0};
   int distanceAtTurnStart_ = 0;
+  int distanceBaseline_ = 0;   // 18-Mizuki 阵地: last observed effective distance
+  std::vector<int> responseOrdStack_;  // 18-Mizuki: 本回合第几张对应（嵌套结算用栈）
   bool attackedThisTurn_[2] = {false, false};
   bool playedCentrifugalThisTurn_[2] = {false, false};
   bool playedLianchengThisTurn_[2] = {false, false};
@@ -458,6 +757,30 @@ class Engine {
   bool revealOppSpecials_[2] = {false, false};
   bool forceUnrespondable_ = false;
   int externalAdded_ = 0;
+  // ---- 26-Innealra 诺伦: 瞬态结算状态 ---------------------------------------
+  bool inBasicAction_ = false;    // 当前正在结算一次基本动作（装附）
+  Player basicActor_ = P0;        // 执行该基本动作的玩家
+  int fateResolvingSlot_ = -1;    // ctx:fate_resolving_slot()
+  bool fateFromTurnStart_ = false;  // ctx:fate_from_turn_start()
+  bool damageToWaku_ = false;     // 本次伤害的结晶进入攻击者的惑
+  Player damageToWakuPlayer_ = P0;  // 该「惑」的持有者（攻击者）
+  bool damageToAuraDistance_ = false;  // 只把装伤结晶改为进入距
+  bool lastAtkResponded_ = false; // 最近一次结算的攻击是否被对应过
+  // 19-Megumi: 本回合的衍生攻击数、「第一次对敌命/敌装造成伤害」标记。
+  int generatedAttacks_[2] = {0, 0};
+  int enemyLifeDamageFired_[2] = {0, 0};
+  int enemyAuraDamageFired_[2] = {0, 0};
+  // 20-Kanawe: 本回合的戏剧条件计数器。
+  bool lifeChangedThisTurn_ = false;   // 《鼓动》基础: 某方命变化
+  int lifeChangeMaxThisTurn_ = 0;      // 《鼓动》升级: 单次命变化量
+  int crystalBatchAny_ = 0;            // 《樱花》升级: 单次移动的结晶数
+  int crystalBatchNonCard_ = 0;        // 《樱花》基础: 单次移到非付与牌处的结晶数
+  int cardCrystalMovesThisTurn_ = 0;   // 《明转》: 本回合通过卡牌移动结晶的次数
+  bool pendingAdvance_[2] = {false, false};   // 已完成戏剧、等待推进地图
+  bool pendingAdvanceTier_[2] = {false, false};  // 该戏剧是否升级版
+  void note_life_change(int delta);
+  void note_crystal_move(const AreaRef& from, const AreaRef& to, int moved, bool cardEffect);
+  bool drama_condition_met(Player p, int inst, int slot, int tier) const;
 
   void notify_aura_changed(Player p);
 
@@ -480,18 +803,15 @@ class Engine {
 
   // A "pick" is a (goddess, form) pair; form is "O" / "A1" / "A2".
   void setup_player(Player p, const std::vector<std::pair<std::string, std::string>>& picks);
-  std::vector<std::pair<std::string, std::string>> draft_pick(Player p);
+  void init_barracks(Player p, const std::vector<std::pair<std::string, std::string>>& picks);  std::vector<std::pair<std::string, std::string>> draft_pick(Player p);
   std::pair<std::string, std::string> draft_ban(
       Player p, const std::vector<std::pair<std::string, std::string>>& opp);
   void setup_player_sets(Player p, const std::vector<std::string>& sets);
   void build_from_pool(Player p, std::vector<int>& normals, std::vector<int>& specials);
-  void run_rebuild(Player p);   // normal rebuild / electronic setup decision
   void resolve_card_effect(Player p, int inst, bool asResponse, bool zenkai = false);
   void play_turn(Player p);
-  void start_phase(Player p);
   void main_phase(Player p);
   void cover_phase(Player p);
-  void end_phase(Player p);
 
   void apply_life_damage(Player target, int n, bool triggerBreak);
   void on_life_loss(Player p, int amount, bool triggerBreak);

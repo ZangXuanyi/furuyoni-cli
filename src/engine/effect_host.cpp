@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <utility>
 
@@ -27,6 +28,9 @@ uint32_t kwflag(const std::string& s) {
   if (s == "no_negate" || s == "不可打消") return AF_NoNegate;
   if (s == "to_distance" || s == "到距") return AF_ToDistance;
   if (s == "prevent_response" || s == "防止对应") return AF_PreventResponse;
+  if (s == "tracking" || s == "追踪") return AF_Tracking;  // 25-Misora
+  if (s == "aura_to_distance" || s == "装到距") return AF_AuraToDistance;  // 26-Innealra
+  if (s == "to_waku" || s == "到惑") return AF_ToWaku;                     // 26-Innealra
   return 0;
 }
 
@@ -68,6 +72,20 @@ void static_attack(CardDef& d, sol::table at) {
   if (kw.is<sol::table>())
     for (auto& kv : static_cast<sol::table>(kw))
       if (kv.second.is<std::string>()) d.attack.keywords |= kwflag(kv.second.as<std::string>());
+  // 24-Shisui 裂伤攻击: wounds = true（沿用 damage 的数值）或
+  // wounds = {aura=.., life=..}（数值本身就是裂伤数）。
+  sol::object w = at["wounds"];
+  if (w.is<bool>() && w.as<bool>()) {
+    d.attack.wound = true;
+  } else if (w.is<sol::table>()) {
+    d.attack.wound = true;
+    sol::table wt = w;
+    sol::object a2 = wt["aura"], l2 = wt["life"];
+    if (a2.is<int>() || a2.is<double>()) d.attack.damage.aura = a2.as<int>();
+    else d.attack.damage.aura.reset();
+    if (l2.is<int>() || l2.is<double>()) d.attack.damage.life = l2.as<int>();
+    else d.attack.damage.life.reset();
+  }
 }
 
 }  // namespace
@@ -137,6 +155,26 @@ EvaluatedAttack read_spec(sol::object spec, Engine& e, LuaCtx& c) {
     ea.damage.life = read_int(dt["life"], e, c);  // 0 is a real value; missing == "-"
   }
   ea.keywords = read_keywords(t["keywords"], e, c);
+  // 24-Shisui 裂伤攻击: wounds = true / {aura=.., life=..} / function -> 表。
+  {
+    sol::object w = t["wounds"];
+    if (w.is<sol::function>()) {
+      auto res = w.as<sol::function>()(c);
+      if (res.valid()) w = res.get<sol::object>();
+    }
+    if (w.is<bool>()) {
+      if (w.as<bool>()) ea.keywords |= AF_Wound;
+    } else if (w.is<sol::table>()) {
+      ea.keywords |= AF_Wound;
+      sol::table wt = w;
+      const std::optional<int> a2 = read_int(wt["aura"], e, c);
+      const std::optional<int> l2 = read_int(wt["life"], e, c);
+      if (a2 || l2) {  // 只写一侧时另一侧为「-」
+        ea.damage.aura = a2;
+        ea.damage.life = l2;
+      }
+    }
+  }
   {
     sol::object ac = t["attacker_chooses_damage"];
     if (ac.is<bool>()) ea.attackerChooses = ac.as<bool>();
@@ -189,7 +227,17 @@ AreaRef area_of(const std::string& s, Player p) {
   if (s == "flare") return AreaRef::flare(p);
   if (s == "distance") return AreaRef::distance();
   if (s == "dust") return AreaRef::dust();
+  if (s == "market") return AreaRef::market(p);  // 23-Akina 股市
+  if (s == "waku") return AreaRef::waku(p);      // 26-Innealra 惑
   return AreaRef::dust();
+}
+
+// 24-Shisui 裂伤指示物所在的区域（0=装 / 1=气 / 2=命；-1 = 非法）。
+int wound_area_of(const std::string& s) {
+  if (s == "aura") return kWoundAura;
+  if (s == "flare") return kWoundFlare;
+  if (s == "life") return kWoundLife;
+  return -1;
 }
 
 BasicAction parse_basic(const std::string& s) {
@@ -270,15 +318,21 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     return n;
   };
   atkutil["source_full_power"] = [](LuaAttack& h) -> bool {
-    if (h.a->sourceDefOverride >= 0 && h.e)
-      return (h.e->def(h.a->sourceDefOverride).flags & CF_FullPower) != 0;
+    if (h.a->sourceDefOverride >= 0 && h.e) {
+      // 祟神复制品: 只有 def 可用；O-S4 的改写按复制者的光环判定。
+      const CardDef& d = h.e->def(h.a->sourceDefOverride);
+      if ((d.flags & CF_FullPower) == 0) return false;
+      return !h.e->terminal_rewrite_active(h.a->attacker);
+    }
     if (h.a->sourceInst < 0 || !h.e) return false;
-    return (h.e->def_of(h.a->sourceInst).flags & CF_FullPower) != 0;
+    return h.e->has_full_power(h.a->sourceInst);
   };
   atkutil["has_keyword"] = [](LuaAttack& h, std::string k) {
     uint32_t f = kwflag(k);
     return f != 0 && (h.a->keywords & f) != 0;
   };
+  // 25-Misora: 该攻击的攻击距离是否包含 d（精密化/惴息悬影用）。
+  atkutil["contains"] = [](LuaAttack& h, int d) { return h.a->range.contains(d); };
   atkutil["aura_damage"] = [](LuaAttack& h, sol::this_state ts) -> sol::object {
     if (!h.a->aura) return sol::make_object(ts.L, sol::nil);
     return sol::make_object(ts.L, *h.a->aura + h.a->auraDelta);
@@ -324,14 +378,32 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     return h.e->card_has_goddess(h.a->sourceInst, g);
   };
   atkutil["negate_damage"] = [](LuaAttack& h) { h.a->negateDamage = true; };
+  // 24-Shisui 裂伤化: 该攻击的 X/Y 伤害变为 {X/Y} 裂伤指示物。
+  atkutil["wound"] = [](LuaAttack& h) { h.a->wound = true; };
   atkutil["swap_damage"] = [](LuaAttack& h) {
     std::swap(h.a->aura, h.a->life);
     std::swap(h.a->auraDelta, h.a->lifeDelta);
   };
   atkutil["no_special_response"] = [](LuaAttack& h) { h.a->keywords |= AF_NoSpecialResponse; };
+  // 22-Renri 构陷: 把攻击的伤害一侧变成「-」。
+  atkutil["no_aura_damage"] = [](LuaAttack& h) { h.a->aura.reset(); };
+  atkutil["no_life_damage"] = [](LuaAttack& h) { h.a->life.reset(); };
   atkutil["remove_unrespondable"] = [](LuaAttack& h) { h.a->keywords &= ~AF_Unrespondable; };
   atkutil["attacker_chooses_damage"] = [](LuaAttack& h) { h.a->attackerChoosesDamage = true; };
   atkutil["terminal"] = [](LuaAttack& h) { h.a->terminal = true; };
+  // 强酸: 因命伤而移动的樱花结晶进入虚（而非敌气）。
+  atkutil["life_to_dust"] = [](LuaAttack& h) { h.a->lifeDamageToDust = true; };
+  // 暗礁海域: 攻击距离只保留最大值与最小值（需先包含至少三个自然数）。
+  atkutil["keep_extremes"] = [](LuaAttack& h) {
+    auto& spans = h.a->range.spans;
+    std::set<int> vals;
+    for (const auto& sp : spans)
+      for (int v = sp.first; v <= sp.second; ++v) vals.insert(v);
+    if (vals.size() < 3) return;
+    spans.clear();
+    spans.push_back({*vals.begin(), *vals.begin()});
+    spans.push_back({*vals.rbegin(), *vals.rbegin()});
+  };
 
   auto ctx = L.new_usertype<LuaCtx>("Ctx");
   ctx["player"] = [](LuaCtx& c) { return static_cast<int>(c.who); };
@@ -340,17 +412,132 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["life"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).life; };
   ctx["aura"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).aura; };
   ctx["flare"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).flare; };
-  ctx["vigor"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).vigor; };
+  ctx["vigor"] = [](LuaCtx& c, int p) { return c.e->effective_vigor(static_cast<Player>(p)); };
   ctx["hand_size"] = [](LuaCtx& c, int p) { return static_cast<int>(c.e->ps(static_cast<Player>(p)).hand.size()); };
   ctx["deck_size"] = [](LuaCtx& c, int p) { return static_cast<int>(c.e->ps(static_cast<Player>(p)).deck.size()); };
   ctx["discard_size"] = [](LuaCtx& c, int p) { return static_cast<int>(c.e->ps(static_cast<Player>(p)).discard.size()); };
   ctx["cover_size"] = [](LuaCtx& c, int p) { return static_cast<int>(c.e->ps(static_cast<Player>(p)).cover.size()); };
   ctx["distance"] = [](LuaCtx& c) { return c.e->distance(); };
+  // 25-Misora 观空: 瞄准点（-1 = 不存在）。
+  ctx["aim"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->aim(p ? static_cast<Player>(*p) : c.who);
+  };
+  ctx["set_aim"] = [](LuaCtx& c, int p, int v) {
+    c.e->set_aim(static_cast<Player>(p), v);
+  };
+  // ---- 24-Shisui 桑畑志水: 裂伤 ---------------------------------------------
+  // 向 target 的 "aura"/"flare"/"life" 放置 n 个裂伤指示物（source 默认 c.who）。
+  ctx["wound"] = [](LuaCtx& c, int target, std::string area, int n, sol::optional<int> source) {
+    const int a = wound_area_of(area);
+    if (a < 0) return;
+    const Player src = source ? static_cast<Player>(*source) : c.who;
+    c.e->add_wound(static_cast<Player>(target), a, n, src);
+  };
+  // 该区域中由 source（省略 = 双方合计）造成的裂伤数。
+  ctx["wound_count"] = [](LuaCtx& c, int target, std::string area, sol::optional<int> source) {
+    const int a = wound_area_of(area);
+    if (a < 0) return 0;
+    return c.e->wound_count(static_cast<Player>(target), a, source ? *source : -1);
+  };
+  // 把双方场上所有裂伤指示物伤害化（owner 决定自己那些裂伤的结算顺序）。
+  ctx["resolve_wounds"] = [](LuaCtx& c, sol::optional<int> owner) {
+    c.e->resolve_all_wounds(owner ? static_cast<Player>(*owner) : c.who);
+  };
+  // 只把 target 的某个区域内的裂伤指示物伤害化（O-S1）。
+  ctx["resolve_wound"] = [](LuaCtx& c, int target, std::string area) {
+    const int a = wound_area_of(area);
+    if (a < 0) return;
+    c.e->resolve_wound_area(static_cast<Player>(target), a);
+  };
+  // 攻击裂伤化: 该攻击的 X/Y 伤害变为 {X/Y} 裂伤（O-S3）。
+  ctx["wound_attack"] = [](LuaCtx& c, LuaAttack& atk) {
+    (void)c;
+    if (atk.a) atk.a->wound = true;
+  };
+  ctx["damage_taken_this_turn"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->damage_taken_this_turn(p ? static_cast<Player>(*p) : c.who);
+  };
+  ctx["no_death"] = [](LuaCtx& c, int p) { return c.e->no_death(static_cast<Player>(p)); };
+  // ---- 23-Akina 源上安琪娜: 资本 / 股市 / 股价 / 投资 / 套现 / 算法 -------------
+  ctx["market"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->ps(p ? static_cast<Player>(*p) : c.who).market;
+  };
+  ctx["stock"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->stock_price(p ? static_cast<Player>(*p) : c.who);
+  };
+  ctx["capital"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->capital(p ? static_cast<Player>(*p) : c.who);
+  };
+  // 套现一次（股市不足 1 个结晶时什么也不做）。返回是否执行。
+  ctx["cash_out"] = [](LuaCtx& c, sol::optional<int> p) -> bool {
+    const Player who = p ? static_cast<Player>(*p) : c.who;
+    if (!c.e->can_cash_out(who)) return false;
+    c.e->cash_out(who);
+    return true;
+  };
+  // 投资一次（没有可翻的投资券或对应区域不足时什么也不做）。返回是否执行。
+  ctx["invest"] = [](LuaCtx& c, sol::optional<int> p) -> bool {
+    return c.e->invest(p ? static_cast<Player>(*p) : c.who);
+  };
+  ctx["invest_available"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->invest_available(p ? static_cast<Player>(*p) : c.who);
+  };
+  // O-N5 算法: 本回合内所有攻击获得距离扩大（近1）与距离缩小（远1）。
+  ctx["set_algorithm"] = [](LuaCtx& c) { c.e->ps(c.who).algorithmThisTurn = true; };
+  ctx["algorithm"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->ps(p ? static_cast<Player>(*p) : c.who).algorithmThisTurn;
+  };
+  // ---- 26-Innealra 诺伦: 惑 / 命运槽 / 共鸣 / 纠葛 --------------------------
+  ctx["waku"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->ps(p ? static_cast<Player>(*p) : c.who).waku;
+  };
+  ctx["fate_slot"] = [](LuaCtx& c, int i) { return c.e->fate_slot(c.who, i); };
+  ctx["fate_pos"] = [](LuaCtx& c, std::string name) { return c.e->fate_pos(c.who, name); };
+  ctx["resolve_fate_slot"] = [](LuaCtx& c, int i, sol::optional<bool> fts) {
+    c.e->resolve_fate_slot(c.who, i, fts.value_or(false));
+  };
+  ctx["resonance"] = [](LuaCtx& c, sol::optional<bool> fts) {
+    c.e->resonance(c.who, fts.value_or(false));
+  };
+  ctx["rotate_fates"] = [](LuaCtx& c) { c.e->rotate_fates(c.who); };
+  ctx["entangle_fates"] = [](LuaCtx& c, bool v) { c.e->entangle_fates(c.who, v); };
+  ctx["fates_entangled"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->fates_entangled(p ? static_cast<Player>(*p) : c.who);
+  };
+  ctx["resonance_count"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->resonance_count(p ? static_cast<Player>(*p) : c.who);
+  };
+  ctx["used_non_innealra"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->used_non_innealra(p ? static_cast<Player>(*p) : c.who);
+  };
+  ctx["used_normal_this_turn"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->ps(p ? static_cast<Player>(*p) : c.who).usedNormalThisTurn;
+  };
+  ctx["fate_resolving_slot"] = [](LuaCtx& c) { return c.e->fate_resolving_slot(); };
+  ctx["fate_from_turn_start"] = [](LuaCtx& c) { return c.e->fate_from_turn_start(); };
+  ctx["cost_paid"] = [](LuaCtx& c) { return c.e->cost_paid(c.source); };
+  ctx["cost_to_waku"] = [](LuaCtx& c) { return c.e->cost_to_waku(c.who, c.source); };
+  ctx["last_attack_responded"] = [](LuaCtx& c) { return c.e->last_attack_responded(); };
+  ctx["set_cannot_use_normals"] = [](LuaCtx& c, int p) {
+    c.e->ps(static_cast<Player>(p)).cannotUseNormals = true;
+  };
+  ctx["cannot_use_normals"] = [](LuaCtx& c, int p) {
+    return c.e->ps(static_cast<Player>(p)).cannotUseNormals;
+  };
+  ctx["set_cannot_retreat"] = [](LuaCtx& c, int p) {
+    c.e->ps(static_cast<Player>(p)).cannotRetreat = true;
+  };
+  ctx["set_rebuild_freeze"] = [](LuaCtx& c, int p) {
+    c.e->set_rebuild_freeze(static_cast<Player>(p));
+  };
+  ctx["fragile_will_active"] = [](LuaCtx& c, int p) {
+    return c.e->fragile_will_host(static_cast<Player>(p)) >= 0;
+  };
   ctx["dust"] = [](LuaCtx& c) { return c.e->st.dust; };
   ctx["crystals"] = [](LuaCtx& c, int inst) { return c.e->ci(inst).crystals; };
   ctx["desperation"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).life <= 3; };
   ctx["hasso"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).aura <= 1; };
-  ctx["shinkyou"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).vigor == 2; };
+  ctx["shinkyou"] = [](LuaCtx& c, int p) { return c.e->effective_vigor(static_cast<Player>(p)) == 2; };
   ctx["rensha"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).cardsPlayedThisTurn >= 3; };
   ctx["last_life_lost"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).lastLifeLost; };
   ctx["is_attack"] = [](LuaCtx& c, int inst) { return c.e->def_of(inst).type == CardType::Attack; };
@@ -384,7 +571,10 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
         std::swap(pFrom, pTo);
       }
     }
-    return c.e->move_crystals(area_of(from, pFrom), area_of(to, pTo), n, true);
+    c.e->set_crystal_mover(c.who);  // 22-Renri 终幕: 记录移动者
+    int moved = c.e->move_crystals(area_of(from, pFrom), area_of(to, pTo), n, true);
+    c.e->clear_crystal_mover();
+    return moved;
   };
   ctx["choose"] = [](LuaCtx& c, std::string prompt, sol::table opts) -> int {
     Request r;
@@ -454,10 +644,11 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     r.minSel = mn;
     r.maxSel = mx;
     if (r.options.empty()) return std::vector<int>{};
+    const int nopts = static_cast<int>(r.options.size());  // r is moved below
     Decision d = e.decide(who, std::move(r));
     std::vector<int> out;
     for (int i : d.indices)
-      if (i >= 0 && i < static_cast<int>(r.options.size())) out.push_back(i);
+      if (i >= 0 && i < nopts) out.push_back(i);
     return out;
   };
   ctx["choose_for"] = [choose_opts_impl](LuaCtx& c, int p, std::string prompt, sol::table opts) {
@@ -543,6 +734,19 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["add_temp_near_distance"] = [](LuaCtx& c, int p, int n) {
     c.e->add_temp_near_distance(static_cast<Player>(p), n);
   };
+  // ---- 17-Hastumi: 航海 / 潜水 ---------------------------------------------
+  ctx["tailwind"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->tailwind(p ? static_cast<Player>(*p) : c.who);
+  };
+  ctx["dive"] = [](LuaCtx& c, int kind) { c.e->declare_dive(c.who, kind); };
+  ctx["dive_state"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->dive_state(p ? static_cast<Player>(*p) : c.who);
+  };
+  // 牌库顶（下一次抽到的牌）；牌库为空返回 -1。
+  ctx["deck_top"] = [](LuaCtx& c, int p) {
+    const auto& d = c.e->ps(static_cast<Player>(p)).deck;
+    return d.empty() ? -1 : d.back();
+  };
   // 祟神: 生成一张被对应攻击的**精确复制**（修正后的距离/伤害/超克/攻击后效果/女神）。
   ctx["copy_attack"] = [this](LuaCtx& c, LuaAttack& src) -> bool {
     Attack* s = src.a;
@@ -563,15 +767,18 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     a.attacker = c.who;
     a.sourceInst = srcInst;  // 复制品照抄来源牌（女神/通常/切札 判定）
     a.sourceDefOverride = srcDef;
+    a.generated = true;      // 20-Kanawe: 复制品是衍生攻击（黄格不加成）
     a.range = s->range;
     a.aura = s->aura;
     a.life = s->life;
     a.auraDelta = s->auraDelta;
     a.lifeDelta = s->lifeDelta;
     a.keywords = s->keywords;
+    a.wound = s->wound;  // 24-Shisui: 裂伤攻击的复制品同样是裂伤
     a.attackerChoosesDamage = s->attackerChoosesDamage;
     a.terminal = s->terminal;
     finalize_attack(*c.e, c.who, a, true);
+    c.e->note_generated_attack(c.who);  // 复制品同样是衍生攻击
     c.e->declare_attack(a);
     c.e->resolve_attack(a);
     if (a.hit) {  // 攻击后效果同样复制
@@ -594,6 +801,7 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     Attack a;
     a.attacker = c.who;
     a.sourceInst = c.source;  // generated attacks belong to the generating card's owner
+    a.generated = true;       // 20-Kanawe: 牌效生成的攻击是衍生攻击（黄格不加成）
     if (c.source >= 0) a.fromSpecial = c.e->def_of(c.source).kind == CardKind::Special;
     a.fromResponse = false;
     EvaluatedAttack ea = read_spec(spec, *c.e, c);
@@ -601,11 +809,13 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     a.aura = ea.damage.aura;
     a.life = ea.damage.life;
     a.keywords = ea.keywords;
+    a.wound = (ea.keywords & AF_Wound) != 0;  // 24-Shisui 裂伤攻击
     a.attackerChoosesDamage = ea.attackerChooses;
     a.terminal = ea.terminal;
     finalize_attack(*c.e, c.who, a, true);
     sol::object after = spec["after"];
     if (after.is<sol::function>()) impl_->attackAfterSpec[&a] = after.as<sol::function>();
+    c.e->note_generated_attack(c.who);  // 19-Megumi A1-S3: 本回合使用过衍生攻击
     c.e->declare_attack(a);  // virtual attacks are attacks too
     c.e->resolve_attack(a);
     if (after.is<sol::function>() && a.hit) {
@@ -617,8 +827,15 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     }
     impl_->attackAfterSpec.erase(&a);
   };
-  ctx["deal_damage"] = [](LuaCtx& c, int target, sol::object aura, sol::object life) {
-    c.e->deal_damage(static_cast<Player>(target), read_int(aura, *c.e, c), read_int(life, *c.e, c), 0);
+  ctx["deal_damage"] = [](LuaCtx& c, int target, sol::object aura, sol::object life,
+                          sol::optional<sol::table> kw) {
+    uint32_t keywords = 0;
+    if (kw) {
+      for (auto& kv : *kw)
+        if (kv.second.is<std::string>()) keywords |= kwflag(kv.second.as<std::string>());
+    }
+    c.e->deal_damage(static_cast<Player>(target), read_int(aura, *c.e, c), read_int(life, *c.e, c),
+                     keywords);
   };
   ctx["draw"] = [](LuaCtx& c, int p, int n) { c.e->draw(static_cast<Player>(p), n); };
   ctx["gain_vigor"] = [](LuaCtx& c, int p, int n) { c.e->gain_vigor(static_cast<Player>(p), n); };
@@ -730,7 +947,50 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     return c.e->aura_damaged_this_turn(static_cast<Player>(p));
   };
   ctx["is_full_power"] = [](LuaCtx& c, int inst) {
-    return (c.e->def_of(inst).flags & CF_FullPower) != 0;
+    return c.e->has_full_power(inst);  // 18-Mizuki O-S4 会移除全力
+  };
+  // ---- 18-Mizuki: 动员 / 兵舍 / 阵地 ----------------------------------------
+  ctx["position"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->position(p ? static_cast<Player>(*p) : c.who);
+  };
+  ctx["mobilize"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->mobilize(p ? static_cast<Player>(*p) : c.who);
+  };
+  ctx["is_soldier"] = [](LuaCtx& c, int inst) { return c.e->is_soldier(inst); };
+  ctx["soldier_mobilized"] = [](LuaCtx& c, int inst) {
+    return c.e->soldier_mobilized(inst);
+  };
+  ctx["barracks"] = [](LuaCtx& c, sol::optional<int> p, sol::this_state ts) -> sol::object {
+    std::vector<int> v =
+        c.e->ps(p ? static_cast<Player>(*p) : c.who).barracks;
+    sol::table t = sol::table::create(ts.L);
+    for (size_t i = 0; i < v.size(); ++i) t[i + 1] = v[i];
+    return sol::make_object(ts.L, t);
+  };
+  ctx["barracks_count"] = [](LuaCtx& c, sol::optional<int> p) {
+    return static_cast<int>(c.e->ps(p ? static_cast<Player>(*p) : c.who).barracks.size());
+  };
+  ctx["mobilized_count"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->barracks_mobilized_count(p ? static_cast<Player>(*p) : c.who);
+  };
+  ctx["gain_soldier"] = [](LuaCtx& c, std::string name) {
+    return c.e->gain_soldier(c.who, name);
+  };
+  ctx["hand_to_barracks"] = [](LuaCtx& c, int inst) {
+    c.e->hand_to_barracks(c.who, inst);
+  };
+  ctx["responded_last_turn"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->responded_last_turn(p ? static_cast<Player>(*p) : c.who);
+  };
+  ctx["first_response"] = [](LuaCtx& c) { return c.e->first_response_played(); };
+  ctx["responses_played"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->responses_played(p ? static_cast<Player>(*p) : c.who);
+  };
+  ctx["attack_cards_played"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->attack_cards_played(p ? static_cast<Player>(*p) : c.who);
+  };
+  ctx["normal_attacks_this_turn"] = [](LuaCtx& c, sol::optional<int> p) {
+    return c.e->normal_attacks_this_turn(p ? static_cast<Player>(*p) : c.who);
   };
   // Yukihi
   ctx["umbrella"] = [](LuaCtx& c, int p) { return c.e->umbrella(static_cast<Player>(p)); };
@@ -742,14 +1002,25 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["cards_played_this_turn"] = [](LuaCtx& c, int p) {
     return c.e->cards_played_this_turn(static_cast<Player>(p));
   };
-  ctx["dust_to_card"] = [](LuaCtx& c, int inst, int n) { return c.e->dust_to_card(inst, n); };
+  ctx["dust_to_card"] = [](LuaCtx& c, int inst, int n) {
+    c.e->set_crystal_mover(c.who);
+    int got = c.e->dust_to_card(inst, n);
+    c.e->clear_crystal_mover();
+    return got;
+  };
   ctx["move_to_card"] = [](LuaCtx& c, std::string from, int inst, int n, sol::optional<int> pf) {
     Player p = pf ? static_cast<Player>(*pf) : c.who;
-    return c.e->move_crystals(area_of(from, p), AreaRef::card(inst), n, true);
+    c.e->set_crystal_mover(c.who);
+    int got = c.e->move_crystals(area_of(from, p), AreaRef::card(inst), n, true);
+    c.e->clear_crystal_mover();
+    return got;
   };
   ctx["move_from_card"] = [](LuaCtx& c, int inst, std::string to, int n, sol::optional<int> pt) {
     Player p = pt ? static_cast<Player>(*pt) : c.who;
-    return c.e->move_crystals(AreaRef::card(inst), area_of(to, p), n, true);
+    c.e->set_crystal_mover(c.who);
+    int got = c.e->move_crystals(AreaRef::card(inst), area_of(to, p), n, true);
+    c.e->clear_crystal_mover();
+    return got;
   };
   ctx["set_used"] = [](LuaCtx& c, int inst) { c.e->set_used(inst); };
   ctx["opponent_pickable"] = [](LuaCtx& c, int inst) {
@@ -773,11 +1044,17 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     call_keiryo(*c.e, c.e->ci(inst).def, c.e->ci(inst).owner, inst, s);
   };
   ctx["is_normal_card"] = [](LuaCtx& c, int i) { return c.e->is_normal_card(i); };
+  ctx["is_response"] = [](LuaCtx& c, int i) {
+    return (c.e->def_of(i).flags & CF_Response) != 0;  // 26-Innealra 怨艾
+  };
   ctx["is_enhance"] = [](LuaCtx& c, int i) { return c.e->is_enhance(i); };
   ctx["enhances"] = [](LuaCtx& c, int p) { return c.e->enhances(static_cast<Player>(p)); };
   ctx["reuse_special"] = [](LuaCtx& c, int i) { c.e->reuse_special(i); };
   ctx["drain_card_crystals"] = [](LuaCtx& c, int i, int n) {
-    return c.e->drain_card_crystals(i, n);
+    c.e->set_crystal_mover(c.who);
+    int got = c.e->drain_card_crystals(i, n);
+    c.e->clear_crystal_mover();
+    return got;
   };
   // Hagane
   ctx["distance_at_turn_start"] = [](LuaCtx& c) { return c.e->distance_at_turn_start(); };
@@ -958,7 +1235,9 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     if (ea.keywords & AF_Overwhelm) kw[ki++] = "overwhelm";
     if (ea.keywords & AF_BothSides) kw[ki++] = "both_sides";
     if (ea.keywords & AF_NoNegate) kw[ki++] = "no_negate";
+    if (ea.keywords & AF_Tracking) kw[ki++] = "tracking";  // 25-Misora
     t["keywords"] = kw;
+    t["wound"] = (ea.keywords & AF_Wound) != 0;  // 24-Shisui 裂伤攻击
     return t;
   };
   ctx["to_hand"] = [](LuaCtx& c, int inst) { c.e->move_card(inst, Zone::Hand); };
@@ -993,6 +1272,148 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     }
     c.e->free_basics_of(static_cast<Player>(p), maxTimes, names);
   };
+
+  // ---- 19-Megumi 泷河希: 耕种 / 土壤 / 假想树 ------------------------------
+  ctx["has_soil"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).hasSoil; };
+  ctx["seeds"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).soilSeeds; };
+  ctx["plants"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).soilPlants; };
+  ctx["green"] = [](LuaCtx& c, int inst) { return c.e->green_of(inst); };
+  ctx["card_crystal_count"] = [](LuaCtx& c, int inst) { return c.e->card_crystal_count(inst); };
+  ctx["total_green_on_enhances"] = [](LuaCtx& c, int p) {
+    return c.e->total_green_on_enhances(static_cast<Player>(p));
+  };
+  ctx["green_zones"] = [](LuaCtx& c, int p) { return c.e->green_zones(static_cast<Player>(p)); };
+  ctx["green_total"] = [](LuaCtx& c, int p) { return c.e->green_total(static_cast<Player>(p)); };
+  ctx["seed_to_plant"] = [](LuaCtx& c, int p, int n) {
+    c.e->seed_to_plant(static_cast<Player>(p), n);
+  };
+  ctx["attach_green"] = [](LuaCtx& c, int inst, int n) { return c.e->attach_green(inst, n); };
+  ctx["detach_green"] = [](LuaCtx& c, int inst, int n) {
+    return c.e->detach_green_to_seeds(inst, n);
+  };
+  ctx["remove_card_crystals"] = [](LuaCtx& c, int inst, int n) {
+    c.e->set_crystal_mover(c.who);
+    int got = c.e->remove_card_crystals(inst, n);
+    c.e->clear_crystal_mover();
+    return got;
+  };
+  ctx["tree_active"] = [](LuaCtx& c, int p) { return c.e->tree_active(static_cast<Player>(p)); };
+  ctx["tree_enter"] = [](LuaCtx& c, int p) {
+    c.e->ps(static_cast<Player>(p)).treeActive = true;
+  };
+  ctx["enhance_active"] = [](LuaCtx& c, int inst) { return c.e->enhance_active(inst); };
+  ctx["tree_slot"] = [](LuaCtx& c, int p, int i) {
+    return c.e->tree_slot(static_cast<Player>(p), i);
+  };
+  ctx["tree_occupied"] = [](LuaCtx& c, int p) {
+    return c.e->tree_occupied(static_cast<Player>(p));
+  };
+  ctx["tree_place"] = [](LuaCtx& c, int p) {
+    return c.e->tree_place_from_soil(static_cast<Player>(p));
+  };
+  ctx["tree_fall"] = [](LuaCtx& c, int p, int n) {
+    c.e->tree_fall(static_cast<Player>(p), n);
+  };
+  ctx["set_next_growth"] = [](LuaCtx& c, int p, int x) {
+    c.e->set_next_growth(static_cast<Player>(p), x);
+  };
+  ctx["growth_of"] = [](LuaCtx& c, int inst) {
+    return c.e->growth_of(static_cast<Player>(c.who), inst);
+  };
+  ctx["used_generated_attack"] = [](LuaCtx& c, int p) {
+    return c.e->used_generated_attack(static_cast<Player>(p));
+  };
+  ctx["is_borrowed"] = [](LuaCtx& c, int inst) { return c.e->is_borrowed(inst); };
+  ctx["card_owner"] = [](LuaCtx& c, int inst) { return c.e->card_owner(inst); };
+  ctx["unchosen_cuts"] = [](LuaCtx& c, int p) {
+    return c.e->unchosen_cuts(static_cast<Player>(p));
+  };
+  ctx["tree_use_cut"] = [](LuaCtx& c, int inst) {
+    c.e->tree_use_cut(static_cast<Player>(c.who), inst);
+  };
+  // ---- 20-Kanawe 叶慧: 地图 / 戏剧 ------------------------------------------
+  // 当前所在地的剧目数值 / 颜色（"red"/"purple"/"green"/"yellow"/"none"）。
+  ctx["node_value"] = [](LuaCtx& c) { return c.e->node_value(c.who); };
+  ctx["node_color"] = [](LuaCtx& c) -> std::string {
+    switch (c.e->node_color(c.who)) {
+      case 0: return "red";
+      case 1: return "purple";
+      case 2: return "green";
+      case 3: return "yellow";
+      default: return "none";
+    }
+  };
+  ctx["node_name"] = [](LuaCtx& c) { return c.e->node_name(c.who); };
+  // 准备下一幕戏剧；返回是否选择了已完成过的戏剧（疾书弗尽据此移出游戏）。
+  ctx["prepare_drama"] = [](LuaCtx& c, sol::optional<bool> allowCompleted) {
+    return c.e->prepare_drama(c.who, allowCompleted ? *allowCompleted : false);
+  };
+  ctx["drama_progressed_last_turn"] = [](LuaCtx& c, int p) {
+    return c.e->drama_progressed_last_turn(static_cast<Player>(p));
+  };
+  // 演出: 本回合不能完成戏剧。
+  ctx["set_no_drama"] = [](LuaCtx& c) { c.e->set_no_drama_this_turn(c.who); };
+  // 芳颜无常: 结算一次当前所在地的效果（红/紫/绿）。
+  ctx["resolve_node_reward"] = [](LuaCtx& c) { c.e->resolve_node_reward(c.who); };
+  // 即兴: 把一张手牌当作对应打出。
+  ctx["play_hand_card_as_response"] = [](LuaCtx& c, int inst) {
+    c.e->play_hand_card_response(c.who, inst);
+  };
+  // 知音难觅: 构筑时未获得的常规牌 / 切牌。
+  ctx["unchosen_normals"] = [](LuaCtx& c, int p, sol::this_state ts) -> sol::object {
+    std::vector<int> v = c.e->unchosen_normals(static_cast<Player>(p));
+    sol::table t = sol::table::create(ts.L);
+    for (size_t i = 0; i < v.size(); ++i) t[i + 1] = v[i];
+    return sol::make_object(ts.L, t);
+  };
+  ctx["unchosen_specials"] = [](LuaCtx& c, int p, sol::this_state ts) -> sol::object {
+    std::vector<int> v = c.e->unchosen_specials(static_cast<Player>(p));
+    sol::table t = sol::table::create(ts.L);
+    for (size_t i = 0; i < v.size(); ++i) t[i + 1] = v[i];
+    return sol::make_object(ts.L, t);
+  };
+  ctx["gain_unchosen_normal"] = [](LuaCtx& c, int inst) {
+    c.e->gain_unchosen_normal(c.who, inst);
+  };
+  ctx["gain_unchosen_cut"] = [](LuaCtx& c, int inst) { c.e->gain_unchosen_cut(inst); };
+  // 移出游戏（不同于「追加区」：不会被重新获得）。
+  ctx["remove_from_game"] = [](LuaCtx& c, int inst) { c.e->remove_from_game(inst); };
+  // 封杀: 宣言一个牌名（记录在本牌上），对手不能使用同名切牌。
+  ctx["declare_cut_ban"] = [](LuaCtx& c) { return c.e->declare_cut_ban(c.who, c.source); };
+  ctx["attacks_and_responses"] = [](LuaCtx& c) { return c.e->attacks_and_responses_this_turn(); };
+
+  // ---- 22-Renri 夜山恋离: 伪证 / 回归 / 铭镌之衣 / 洛阳铲 -------------------
+  ctx["doubt_failed"] = [](LuaCtx& c, int p) {
+    return c.e->ps(static_cast<Player>(p)).doubtFailedThisTurn;
+  };
+  ctx["impatience"] = [](LuaCtx& c, int p) { c.e->impatience(static_cast<Player>(p)); };
+  ctx["bluff_active"] = [](LuaCtx& c) { return c.e->bluff_active(); };
+  ctx["bluff_undoubted"] = [](LuaCtx& c) { return c.e->bluff_undoubted(); };
+  ctx["bluff_doubt_failed"] = [](LuaCtx& c) { return c.e->bluff_doubt_failed(); };
+  ctx["bluff_is_real"] = [](LuaCtx& c) { return c.e->bluff_is_real(); };
+  ctx["bluff_inst"] = [](LuaCtx& c) { return c.e->bluff_inst(); };
+  ctx["bluff_claim_name"] = [](LuaCtx& c) { return c.e->bluff_claim_name(); };
+  // 让正在结算的这张牌按另一张牌结算（铭镌之衣的复制 / 洛阳铲的声称）。
+  ctx["resolve_as"] = [](LuaCtx& c, std::string name) {
+    return c.e->resolve_as(c.source, name);
+  };
+  ctx["def_cost"] = [](LuaCtx& c, std::string name) { return c.e->def_cost_by_name(name); };
+  // 这张牌当前的实际切札费用（含修正），供借用对手的牌时判断能否支付。
+  ctx["cut_cost"] = [](LuaCtx& c, int inst) {
+    return c.e->cut_cost(c.who, c.e->ci(inst).def, inst);
+  };
+  // 洛阳铲: 对手眼前构筑阶段能够选择的常规非付与牌名。
+  ctx["opp_build_normals"] = [](LuaCtx& c, sol::this_state ts) -> sol::object {
+    sol::table t = sol::state_view(ts.L).create_table();
+    int i = 1;
+    for (const std::string& n : c.e->opponent_build_normals(c.who)) t[i++] = n;
+    return t;
+  };
+  // 洛阳铲: 对手是否从手牌/盖牌堆/弃牌堆展示了该名称的牌。
+  ctx["opp_shows"] = [](LuaCtx& c, std::string name) {
+    return c.e->opponent_shows_name(c.who, name);
+  };
+  ctx["crystal_left_dust"] = [](LuaCtx& c) { return c.e->crystal_left_dust_this_turn(); };
 
   auto costutil = L.new_usertype<LuaCost>("Cost");
   costutil["set"] = [](LuaCost& c, int v) { c.value = v; };
@@ -1083,12 +1504,25 @@ void EffectHost::load_file(const std::string& path, std::vector<CardDef>& defs) 
     d.upgrade = t.get_or("upgrade", std::string());
     d.reverseMoves = t.get_or("reverse_moves", false);
     d.complete = t.get_or("complete", false);
-    d.limitDistance = t.get_or("limit_distance", false);
+    // 「限制距离X-Y」= 打出时当前距必须 ∈ [X,Y]；Lua: limit_distance = { lo, hi }。
+    sol::object lim = t["limit_distance"];
+    if (lim.is<sol::table>()) {
+      sol::table lt = lim;
+      sol::object lo = lt[1];
+      sol::object hi = lt[2];
+      if (lo.is<int>() || lo.is<double>()) {
+        d.limitDistanceLo = lo.as<int>();
+        d.limitDistanceHi = (hi.is<int>() || hi.is<double>()) ? hi.as<int>() : d.limitDistanceLo;
+      }
+    }
     d.responseOnly = t.get_or("response_only", false);
     d.denyEnemyAura = t.get_or("deny_enemy_aura", false);
     d.protectsEnemy = t.get_or("protects_enemy", false);
     d.memoryDraw = t.get_or("memory_draw", false);
     d.memoryRebuildShield = t.get_or("memory_rebuild_shield", false);
+    d.compass = t.get_or("compass", false);
+    d.keepCrystalsUnlessTailwind = t.get_or("keep_crystals_unless_tailwind", false);
+    d.interceptNonAttack = t.get_or("intercept_non_attack", false);
     {
       sol::object ng = t["nagi"];
       if (ng.is<sol::function>()) {
@@ -1100,6 +1534,56 @@ void EffectHost::load_file(const std::string& path, std::vector<CardDef>& defs) 
     d.nearDistanceMod = t.get_or("near_distance_mod", 0);
     d.copies = t.get_or("copies", 1);
     d.decayTo = t.get_or("decay_to", std::string("dust"));
+    d.soldier = t.get_or("soldier", false);                  // 18-Mizuki 士兵
+    d.terminalRewrite = t.get_or("terminal_rewrite", false); // 18-Mizuki O-S4
+    // ---- 19-Megumi 泷河希 ----
+    d.growth = t.get_or("growth", -1);                       // 生长X
+    d.greenDistance = t.get_or("green_distance", false);     // 芦苇
+    d.crystalImmune = t.get_or("crystal_immune", false);     // 终结之果实
+    d.redirectCrystals = t.get_or("redirect_crystals", false);
+    d.keepCrystalsOnOppTurn = t.get_or("keep_crystals_on_opp_turn", false);
+    d.triggerFromRemoved = t.get_or("trigger_from_removed", false);
+    // ---- 20-Kanawe 叶慧: 地图 / 戏剧 ----
+    d.isDrama = t.get_or("drama", false);                    // 戏剧牌
+    d.dramaSlot = t.get_or("drama_slot", 0);                 // 1..6 = O-T1..T6
+    d.cutBan = t.get_or("cut_ban", false);                   // 封杀
+    // ---- 22-Renri 夜山恋离 ----
+    d.bluff = t.get_or("bluff", false);                      // 伪证牌
+    d.relic = t.get_or("relic", false);                      // 史前遗物
+    d.regression = t.get_or("regression", false);            // 回归
+    d.kaoguReturn = t.get_or("kaogu_return", false);         // 考古
+    d.rebuildClaim = t.get_or("rebuild_claim", false);       // 谎言的武器
+    d.startUsed = t.get_or("start_used", false);             // 开局使用后状态
+    d.enemyImpatienceUp = t.get_or("enemy_impatience_up", false);
+    d.enemyCrystalImmune = t.get_or("enemy_crystal_immune", false);
+    d.nagiFromLife = t.get_or("nagi_from_life", 0);
+    // ---- 25-Misora 观空: 瞄准点 / 追踪 / 距离限制 ----
+    d.distanceIsAim = t.get_or("distance_is_aim", false);
+    d.noAdvanceEscape = t.get_or("no_advance_escape", false);
+    d.noReuse = t.get_or("no_reuse", false);
+    // ---- 24-Shisui 桑畑志水: 裂伤费用 / 埋骨地 ----
+    d.woundCost = t.get_or("wound_cost", -1);
+    d.noDeath = t.get_or("no_death", false);
+    // ---- 23-Akina 源上安琪娜: 投资券 / 股价费用 / 差列递归 / 仙霄鬼泉 ----
+    d.investmentTicket = t.get_or("investment_ticket", false);
+    d.stockCost = t.get_or("stock_cost", false);
+    d.reuseWhileAhead = t.get_or("reuse_while_ahead", false);
+    d.crystalShield = t.get_or("crystal_shield", false);
+    d.cashSubstitute = t.get_or("cash_substitute", false);
+    // ---- 26-Innealra 诺伦: 形态列表 / 命运 / 纠葛 / 惑 ----
+    {
+      sol::object fs = t["forms"];
+      if (fs.is<sol::table>())
+        for (auto& kv : static_cast<sol::table>(fs))
+          if (kv.second.is<std::string>()) d.forms.push_back(kv.second.as<std::string>());
+    }
+    d.isFate = t.get_or("fate", false);
+    d.fateSlot = t.get_or("fate_slot", 0);
+    d.fateEntangler = t.get_or("fate_entangler", false);
+    d.suppressEnemyAttackMods = t.get_or("suppress_enemy_attack_mods", false);
+    d.nagiFromDistance = t.get_or("nagi_from_distance", false);
+    d.rebuildFreeze = t.get_or("rebuild_freeze", false);
+    d.fragileWill = t.get_or("fragile_will", false);
     d.flags = flags_from(t);
     sol::object atk = t["attack"];
     if (atk.is<sol::table>()) {
@@ -1268,6 +1752,10 @@ void EffectHost::finalize_attack(Engine& e, Player attacker, Attack& a, bool con
 
   // 3) Remaining continuous attack modifiers.
   run_continuous_pass(1);
+  // 3.5) 23-Akina O-N5 算法: 本回合内所有攻击 lo-1 / hi-1。
+  e.apply_algorithm(a);
+  // 4) 罗盘: 攻击距离追加/删除离散值 5（多个罗盘相互抵消）。
+  e.apply_compass(a);
 }
 
 void EffectHost::clear_pending_mods(bool endOfTurnOnly) {
@@ -1406,6 +1894,11 @@ void EffectHost::fire(Engine& e, const std::string& event, Player subject, Attac
     for (int inst : e.ps(owner).enhance) cards.push_back(inst);
     for (int inst : e.ps(owner).special)
       if (e.ci(inst).faceUp) cards.push_back(inst);
+    // 19-Megumi 假想树: 移出游戏后触发器仍然生效的牌（A1-S4）。
+    for (int i = 0; i < static_cast<int>(e.st.insts.size()); ++i)
+      if (e.st.insts[i].holder == owner && e.st.insts[i].zone == Zone::Removed &&
+          e.def_of(i).triggerFromRemoved)
+        cards.push_back(i);
     for (int inst : e.ps(owner).hand) cards.push_back(inst);  // hand triggers (伞飞转)
     int aura = e.active_transform_inst(owner);                // 变形 aura triggers
     if (aura >= 0) cards.push_back(aura);

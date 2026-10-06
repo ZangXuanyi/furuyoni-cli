@@ -52,7 +52,8 @@ inline int find_def(const Engine& e, const std::string& setOrGoddess, const std:
 // 36 crystals exist unless a card explicitly takes some from outside the game.
 inline long long crystals_total(const Engine& e) {
   long long t = 0;
-  for (int i = 0; i < 2; ++i) t += e.st.p[i].life + e.st.p[i].aura + e.st.p[i].flare;
+  for (int i = 0; i < 2; ++i)
+    t += e.st.p[i].life + e.st.p[i].aura + e.st.p[i].flare + e.st.p[i].market + e.st.p[i].waku;
   t += e.st.distance + e.st.dust;
   for (const auto& ci : e.st.insts) t += ci.crystals;
   return t;

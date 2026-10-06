@@ -52,16 +52,69 @@ struct CardDef {
   std::string upgrade;             // 完全态: 升级后的牌名（八叶）
   bool reverseMoves = false;       // 映界: 你所有要移动樱花结晶的牌都可以反向执行
   bool complete = false;           // 八叶: 这张牌是完全态（升级版）
-  bool limitDistance = false;      // 八叶镜陨茕樱: 有效距离限制在 0..7
+  // 「限制距离X-Y」= 打出这张牌时当前距必须 ∈ [X,Y]（类似攻击牌的距离限制）。
+  // 八叶镜陨茕樱 0-7 / 空之翼 0-3 / 乱拨 0-3 / 旌旗护身 0-4 / 正解 0-7。
+  int limitDistanceLo = -1;
+  int limitDistanceHi = -1;
   bool responseOnly = false;       // 格杀: 仅限对应打出
   bool denyEnemyAura = false;      // 血飞沫: 进入敌装的结晶改为进虚
   bool protectsEnemy = false;      // 阡: 本牌弃置前对手不会死亡
   bool memoryDraw = false;         // 此目所及之物与世: 可不抽牌而取回忆区
   bool memoryRebuildShield = false;// 此目所及之物与世: 重铸命伤可改为移除回忆区一张牌
+  bool compass = false;            // 罗盘: 我方攻击距离追加离散值 5 / 对手攻击删除离散值 5
+  bool keepCrystalsUnlessTailwind = false;  // 弄潮: 仅自己回合且顺风时才能移除本牌上的结晶
+  bool interceptNonAttack = false; // 子午灯塔: 对手回合内对手从手牌使用非攻击牌时改为弃置本牌
   int distanceMod = 0;             // 展开中的持续距离修正（蹑足 -2）
   int nearDistanceMod = 0;         // 达人距离修正（圈域 +1 / 引力场 -1）
   int copies = 1;                  // number of instances to create (灭灯毒 x2)
   std::string decayTo = "dust";    // where removed 献 goes (圈域 -> "distance")
+  bool soldier = false;            // 18-Mizuki 士兵牌（开局置于兵舍，不进构筑池）
+  bool terminalRewrite = false;    // 18-Mizuki O-S4: 改写 终端/全力 词条的光环
+  // ---- 20-Kanawe: 地图 / 戏剧 ----------------------------------------------
+  bool isDrama = false;            // 戏剧牌（不进构筑，开局放入戏剧区）
+  int dramaSlot = 0;               // 1..6 = O-T1..O-T6
+  bool cutBan = false;             // 封杀: 展开中禁止对手使用同名切牌
+  // ---- 19-Megumi: 耕种 / 假想树 ------------------------------------------
+  int growth = -1;                 // 生长X（-1 = 无该词条）
+  bool greenDistance = false;      // 芦苇: 有效距离 + 本牌上的绿色结晶数
+  bool crystalImmune = false;      // 终结之果实: 本牌结晶不可被其它手段移除
+  bool redirectCrystals = false;   // 终结之果实: 其它付与牌要移除的结晶改为移到此牌
+  bool keepCrystalsOnOppTurn = false;  // 蔷薇: 对手回合内不能移除本牌上的结晶
+  bool triggerFromRemoved = false;     // 假想树的牌移出游戏后其触发器仍生效
+  // ---- 22-Renri 夜山恋离: 伪证 / 回归 / 史前遗物 ----------------------------
+  bool bluff = false;               // 伪证牌: 可以被声称的牌名（构陷/夸口/…）
+  bool relic = false;               // 史前遗物（谎言的武器 / 刀刃的本质 / 最初的樱花）
+  bool regression = false;          // 回归: 对手质疑失败时可以移出游戏
+  bool kaoguReturn = false;         // 考古: 回归时从游戏外回到弃牌堆
+  bool rebuildClaim = false;        // 谎言的武器: 重铸牌库时可宣称盖牌区一张背面牌为它并如设置打出
+  bool startUsed = false;           // 游戏开始时设为使用后状态（道化的觉悟）
+  bool enemyImpatienceUp = false;   // 对手受到的焦躁伤害变为 2/1（道化的觉悟）
+  bool enemyCrystalImmune = false;  // 对手不能移动这张牌上的樱花结晶（终幕）
+  int nagiFromLife = 0;             // 纳支付中至少要有 N 个结晶来自持有者的命
+  // ---- 25-Misora 观空: 瞄准点 / 追踪 ----
+  bool distanceIsAim = false;    // 蔽目重云: 展开中当前距离变为持有者的瞄准点
+  bool noAdvanceEscape = false;  // 蔽目重云: 展开中持有者不能前进或离脱
+  bool noReuse = false;          // 观空穹仪: 不能被其它牌的效果再次发动
+  // ---- 24-Shisui 桑畑志水: 裂伤费用 / 埋骨地 ----
+  int woundCost = -1;            // 切札费用 {X}: 向自气放置 X 个裂伤指示物（-1 = 无）
+  bool noDeath = false;          // 埋骨地: 展开中持有者的命为 0 也不会死亡
+  // ---- 23-Akina 源上安琪娜: 资本 / 股价 / 投资 ----
+  bool investmentTicket = false; // 投资券：可被「投资」翻至背面向上（恫吓/直接金融/正解）
+  bool stockCost = false;        // 切札费用 = 当前股价，且不能被任何费用修正改变
+  bool reuseWhileAhead = false;  // 差列递归: 资本 > 对手时必须再使用一次（照常付费）
+  bool crystalShield = false;    // 仙霄鬼泉: 本牌结晶不能被本牌以外的任何方式移除
+  bool cashSubstitute = false;   // 正解「使用后」: 每回合开始可用 1自装到自气 替代套现
+  // ---- 26-Innealra 诺伦: 三把枪 / 命运槽 / 惑 / 纠葛 ---------------------------
+  // 共有牌（挥枪/雨露霜雪/变迁/万劫缠迫）用 forms 列出适用的形态；
+  // form 仍是其基准形态（决定 pack/构筑显示）。
+  std::vector<std::string> forms;
+  bool isFate = false;           // 命运（隐藏 CardDef，不进构筑/不实例化）
+  int fateSlot = 0;              // 开局放入的命运槽（0 过去 / 1 现在 / 2 未来 / 3 待启）
+  bool fateEntangler = false;    // 万劫缠迫：展开中纠葛持有者的所有命运
+  bool suppressEnemyAttackMods = false;  // 阴郁·埋葬: 对手的攻击不受攻击修正
+  bool nagiFromDistance = false; // 舍弃·希冀: 这张牌的献可以从距中选择
+  bool rebuildFreeze = false;    // 栖身·垂暮: 对手下一次重铸时弃牌堆不移动
+  bool fragileWill = false;      // 脆弱意志: 对手装附外的装获得改为进此牌；基本装附则移除此牌1结晶
   std::string text;
 };
 
@@ -76,9 +129,11 @@ struct CardInstance {
   bool assembled = false;  // for Parts: assembled (hidden from the opponent)
   bool usedThisTurn = false;  // 切牌: used this turn (大重力·无限 再起)
   int crystals = 0;        // crystals sitting on an enhancement / card area
+  int green = 0;           // 19-Megumi: 绿色结晶（视作樱花结晶，但移除时优先移除樱花）
   int sealedBy = -1;       // for Sealed: the host card it is sealed under
   int bagOwner = -1;       // for Poison: which player's 毒袋 it returns to
   std::vector<int> sealed; // cards sealed under this card
+  bool soldier = false;    // 18-Mizuki: a 兵舍 soldier (faceUp == 已动员)
 };
 
 struct PlayerState {
@@ -126,6 +181,57 @@ struct PlayerState {
   bool skipMainPhase = false;   // 踽踽虚路行: lose the next main phase
   bool suppressAuraRedirect = false;  // 双掌生花 打出时的那次装附不替换
   bool firstTurnDone = false;
+  // ---- 18-Mizuki: 兵舍 / 阵地 / 对应计数 -------------------------------------
+  std::vector<int> barracks;           // 士兵实例（兵舍；zone==Limbo；faceUp==已动员）
+  bool distChanged = false;            // 本回合内有效距离是否变化过（阵地）
+  bool respondedThisTurn = false;      // 本回合进行过对应
+  bool respondedLastTurn = false;      // 上一回合进行过对应
+  int attackCardsPlayedThisTurn = 0;   // 本回合打出的攻击牌数
+  int normalAttacksThisTurn = 0;       // 本回合宣告的通常牌攻击数
+  int responsesPlayedThisTurn = 0;     // 本回合打出的对应牌数
+  // ---- 17-Hastumi: 航海 / 潜水 ---------------------------------------------
+  bool tailwind = true;          // 航海: 本回合顺风（回合开始时判定）
+  bool forcedTailwind = false;   // 潜水闪避: 下回合固定顺风
+  bool oppAttackedLastTurn = false;  // 航海: 上一回合对手进行过攻击
+  int dive = 0;                  // 潜水: 0=无, 1=前进, 2=后退（对对手保密）
+  // ---- 19-Megumi: 耕种 / 土壤 / 假想树 --------------------------------------
+  bool hasSoil = false;          // 这局使用了泷河希（启用土壤机制）
+  int soilSeeds = 0;             // 土壤「种子」（开局 5）
+  int soilPlants = 0;            // 土壤「植株」
+  std::vector<int> tree;         // 假想树 6 格（0/1 占用）: 1 格 + 2 格 + 3 格
+  bool treeActive = false;       // 假想树已加入游戏
+  int nextGrowth = 0;            // 脱粒: 本回合下一张非希付与牌获得的生长X
+  // ---- 20-Kanawe: 地图 / 戏剧 ----------------------------------------------
+  std::string node = "O2";       // 当前地图节点
+  std::vector<int> dramas;       // 6 张戏剧实例（O-T1..O-T6，zone==Removed）
+  int dramaPrepared = -1;        // 戏剧栏中的实例（-1 = 空）
+  bool dramaProgressedThisTurn = false;  // 本回合内推进过戏剧
+  bool dramaProgressedLastTurn = false;  // 上一回合内推进过戏剧（疾书弗尽）
+  bool noDramaThisTurn = false;          // 演出: 本回合不能完成戏剧
+  // ---- 22-Renri 夜山恋离: 伪证 ---------------------------------------------
+  bool doubtFailedThisTurn = false;      // 这个玩家本回合质疑失败过
+  // ---- 25-Misora 观空: 瞄准点 ----------------------------------------------
+  int aim = -1;              // 瞄准点（回合结束时记录的当前距；-1 = 不存在）
+  // ---- 24-Shisui 桑畑志水: 裂伤 ---------------------------------------------
+  // 裂伤指示物不占据位置: wound[area][source] = 该区域中由 source 造成的裂伤数。
+  // area: 0=装 / 1=气 / 2=命（见 WoundArea）。
+  int wound[3][2] = {{0, 0}, {0, 0}, {0, 0}};
+  int damageTakenThisTurn = 0;  // 本回合内受到伤害的次数（含裂伤伤害化）
+  // ---- 23-Akina 源上安琪娜: 股市 / 股价 / 本回合结算标记 -----------------------
+  int market = 0;                // 股市（樱花结晶，公开信息；仅安琪娜玩家有效）
+  int stockPrice = 2;            // 股价：初始 2，取值域 [1,4]
+  bool algorithmThisTurn = false;  // 算法：本回合内所有攻击 lo-1 / hi-1
+  bool cashOutThisTurn = false;    // 本回合内是否套现过（回合结束投资的条件）
+  // ---- 26-Innealra 诺伦: 惑 / 命运槽 / 本回合计数 ----------------------------
+  int waku = 0;                  // 惑（樱花结晶，公开信息；仅诺伦玩家使用）
+  int fate[4] = {-1, -1, -1, -1};  // 命运槽: 0 过去 / 1 现在 / 2 未来 / 3 待启（存 def id）
+  bool fatesEntangled = false;   // 纠葛（万劫缠迫展开中）
+  int resonanceCountThisTurn = 0;      // 本回合共鸣次数
+  bool usedNonInnealraThisTurn = false;  // 本回合使用过非诺伦的牌
+  int usedNormalThisTurn = 0;          // 本回合使用的通常牌数
+  bool cannotUseNormals = false;       // 修省（纠葛）: 本回合不能使用通常牌
+  bool cannotRetreat = false;          // 悔恨: 本回合不能后退
+  bool nextRebuildFreeze = false;      // 栖身·垂暮: 下一次重铸时弃牌堆不移动
   std::vector<int> deck, hand, discard, cover, enhance, special;
 };
 
