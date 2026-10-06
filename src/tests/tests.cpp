@@ -639,6 +639,7 @@ TEST_CASE("Yukihi: weapon switch, 即再起, and shared range") {
   int wi = e.add_instance(wu, P0);
   e.move_card(wi, Zone::Special);
   e.ci(wi).faceUp = true;
+  e.ci(wi).crystals = 7;  // 无常其心 is 【纳7】; an expanded 付与 needs 献
   CHECK(e.shared_range(P0));
 }
 
@@ -779,7 +780,7 @@ TEST_CASE("Thallya: steam burn / recover / pneumatic") {
   e.pneumatic(P0);  // FirstAgent picks 距离 +1
   CHECK(e.ps(P0).steamEngine == 4);
   CHECK(e.distance() == d0 + 1);
-  e.reset_steam_at_turn_start();
+  e.reset_steam_at_turn_start(P0);
   CHECK(e.ps(P0).steamOnDist == 0);
   CHECK(e.ps(P0).steamExhausted == 2);  // the 气动 steam went to the exhausted module
 }

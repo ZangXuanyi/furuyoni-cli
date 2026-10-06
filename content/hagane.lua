@@ -70,12 +70,7 @@ return {
       local n = ctx:zenkai() and 2 or 1
       ctx:move("distance", "aura", n, ctx:player(), ctx:player())
     end,
-    continuous = {
-      { when = "expanded", query = "attack",
-        apply = function(ctx, atk)
-          if atk:attacker() == ctx:player() then atk:shrink_far(1) end
-        end },
-    } },
+    near_distance_mod = -1 },
 
   { set = "hagane", form = "O", num = 1, name = "大天空·破限", kind = "special", type = "attack",
     cost = 4,
@@ -155,8 +150,11 @@ return {
           local sel = ctx:choose_cards("大炼成：封印一张非破钟攻击牌", pool, 1, 1)
           for _, c in ipairs(sel) do ctx:seal_card(ctx:source_inst(), c) end
         end
-        local e = ctx:gain_extra("炼成攻击")
-        if e >= 0 then ctx:to_deck_bottom(e) end
+        -- 只有确实封印了牌才产出「炼成攻击」（否则会得到一张空规格的复制）。
+        if ctx:sealed_card(ctx:source_inst()) >= 0 then
+          local e = ctx:gain_extra("炼成攻击")
+          if e >= 0 then ctx:to_deck_bottom(e) end
+        end
       else
         ctx:dust_to_card(ctx:source_inst(), 1)
       end

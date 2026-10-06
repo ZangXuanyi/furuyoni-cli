@@ -19,8 +19,8 @@ struct EvaluatedAttack {
   Range range;
   Damage damage;
   uint32_t keywords = 0;
-  int evade = 0;                 // 问答: defender may cover N to take no damage
   bool attackerChooses = false;  // 畏掠: attacker picks the damage side
+  bool terminal = false;         // 电磁炮 黄: this attack ends the main phase
 };
 
 // Opaque per-card trigger spec (defined in the .cpp).
@@ -57,7 +57,8 @@ class EffectHost {
   EvaluatedAttack eval_attack(Engine& e, int defId, Player who, int inst, bool asResponse);
 
   // Run this card's `continuous` hooks whose query == "attack".
-  void run_continuous_attack(Engine& e, int defId, Player who, int inst, Attack& a);
+  // pass: 0 = replacement effects only, 1 = non-replacement only, -1 = all.
+  void run_continuous_attack(Engine& e, int defId, Player who, int inst, Attack& a, int pass = -1);
 
   // Apply the attacker's pending "next attack" modifiers and all active
   // continuous attack modifiers. `consumePending` removes matched modifiers.
@@ -77,8 +78,18 @@ class EffectHost {
   ResetInfo reset_info(int defId) const;
   bool eval_reset_cond(Engine& e, int defId, Player who, int inst);
 
+  // Apply a card's active `continuous` cost aura (query == "cost").
+  int eval_continuous_cost(Engine& e, Player owner, int inst, int cost);
+
   // Clear pending "next attack" modifiers; endOfTurnOnly keeps non-expiring ones.
   void clear_pending_mods(bool endOfTurnOnly);
+
+  // Number of outstanding "next attack" modifiers (for state hashing).
+  size_t pending_mod_count() const;
+
+  // Lua runtime errors are counted; in strict mode the first one throws.
+  void set_strict(bool v);
+  int error_count() const;
 
   // Fire a named event; runs matching `triggers` on every active card (APNAP).
   void fire(Engine& e, const std::string& event, Player subject, Attack* atk, int card, bool first);

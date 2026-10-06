@@ -28,15 +28,9 @@ return {
     respond = function(ctx) return ctx:hasso(ctx:player()) end,
     on_play = function(ctx) ctx:move("distance", "dust", 1) end },
 
-  -- 达人距离（我方攻击距离远+1）；其结晶按正常规则移除时进入距。
+  -- 达人距离 +1（影响双方的前进/离脱阈值）；其结晶按正常规则移除时进入距。
   { set = "saine", form = "O", num = 5, name = "圈域", kind = "normal", type = "enhance",
-    nagi = 2, decay_to = "distance",
-    continuous = {
-      { when = "expanded", query = "attack",
-        apply = function(ctx, atk)
-          if atk:attacker() == ctx:player() then atk:extend_far(1) end
-        end },
-    } },
+    nagi = 2, decay_to = "distance", near_distance_mod = 1 },
 
   { set = "saine", form = "O", num = 6, name = "冲音晶", kind = "normal", type = "enhance",
     nagi = 1, response = true,
@@ -89,7 +83,7 @@ return {
   ---------------------------------------------------------------------------
   { set = "saine.A1", form = "A1", num = 1, name = "合奏", kind = "normal", type = "attack",
     response = true, goddess2 = "tokoyo",
-    attack = { range = {2, 5}, damage = { aura = 3 } },
+    attack = { range = {2, 5}, damage = { aura = 3, life = 0 } },
     on_play = function(ctx)
       local me = ctx:player()
       if ctx:used_special_count(me, "saine") > 0 then
@@ -106,7 +100,8 @@ return {
     triggers = {
       { event = "attack_declared",
         cond = function(ctx, ev)
-          if ev:subject() == ctx:player() or not ev:first() then return false end
+          -- 对手"其回合内"的第一次攻击：对手在我方回合作为对应打出的攻击不算。
+          if ev:subject() == ctx:player() or not ev:first() or ctx:is_my_turn() then return false end
           if ctx:hasso(ctx:player()) then return true end
           for _, inst in ipairs(ctx:used_specials(ctx:player())) do
             if not ctx:card_is_goddess(inst, "saine") then return true end

@@ -9,14 +9,14 @@ return {
   -- 本格 O 书
   ---------------------------------------------------------------------------
   { set = "shinra", form = "O", num = 1, name = "立论", kind = "normal", type = "attack",
-    attack = function(ctx)
-      if ctx:deck_size(ctx:opp()) >= 2 then return { range = {2, 7} } end
-      return { range = {2, 7}, damage = { aura = 2 } }
-    end,
+    -- 立论没有独立的"攻击后"段落 => 条件在结算时重判（裁定），而不是声明时锁定。
+    attack = function(ctx) return { range = {2, 7} } end,
     on_attack_after = function(ctx)
       if ctx:deck_size(ctx:opp()) >= 2 then
         ctx:cover_top(ctx:opp())
         ctx:cover_top(ctx:opp())
+      else
+        ctx:deal_damage(ctx:opp(), 2, nil)
       end
     end },
 
@@ -171,7 +171,8 @@ return {
   { set = "shinra", form = "O", num = 3, name = "天地反驳", kind = "special", type = "enhance",
     nagi = 5, full_power = true,
     continuous = {
-      { when = "expanded", query = "attack",
+      -- 官方 QA：数值替换先于任何数值增减，故标记 replace=true（先于 next_attack_mod）。
+      { when = "expanded", query = "attack", replace = true,
         apply = function(ctx, atk)
           if atk:attacker() == ctx:player() then atk:swap_damage() end
         end },
@@ -182,7 +183,10 @@ return {
     on_enter = function(ctx) ctx:move("dust", "life", 2, ctx:player(), ctx:player()) end,
     triggers = {
       { event = "enhance_left",
-        cond = function(ctx, ev) return ev:card() ~= ctx:source_inst() end,
+        cond = function(ctx, ev)
+          -- 只有"你的"其他付与牌离场才触发。
+          return ev:subject() == ctx:player() and ev:card() ~= ctx:source_inst()
+        end,
         run = function(ctx, ev) ctx:lose_life(ctx:opp(), 1) end },
     },
     on_discard = function(ctx) ctx:die(ctx:player()) end },

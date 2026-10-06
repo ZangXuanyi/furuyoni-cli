@@ -15,6 +15,9 @@ find_package(nlohmann_json REQUIRED)
 
 add_library(furuyoni
   src/engine/engine.cpp
+  src/engine/engine_attack.cpp
+  src/engine/engine_observe.cpp
+  src/engine/engine_setup.cpp
   src/engine/effect_host.cpp
   src/protocol/agent.cpp
 )
@@ -39,9 +42,20 @@ add_executable(furuyoni-cli src/tools/main.cpp)
 target_link_libraries(furuyoni-cli PRIVATE furuyoni)
 
 enable_testing()
-add_executable(furuyoni-tests src/tests/tests.cpp)
+add_executable(furuyoni-tests
+  src/tests/tests.cpp
+  src/tests/engine_tests.cpp
+  src/tests/rules_matrix_tests.cpp
+)
 target_link_libraries(furuyoni-tests PRIVATE furuyoni)
 add_test(NAME unit COMMAND furuyoni-tests)
 
 # Run tests from the project root so content paths resolve.
 set_tests_properties(unit PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+# A deeper randomized sweep (scale with FY_FUZZ_GAMES).
+add_test(NAME fuzz COMMAND furuyoni-tests "--test-case=invariants*,engine tolerates*")
+set_tests_properties(fuzz PROPERTIES
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  ENVIRONMENT "FY_FUZZ_GAMES=60"
+  TIMEOUT 1800)

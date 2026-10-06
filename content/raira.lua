@@ -19,7 +19,10 @@ local function use_raira(ctx, forbidSame, used)
   if #opts == 0 then return false end
   local labels = {}
   for _, o in ipairs(opts) do labels[#labels + 1] = o.label end
-  local o = opts[ctx:choose("岚之力", labels)]
+  labels[#labels + 1] = "不使用"
+  local pick = ctx:choose("岚之力", labels)
+  if pick > #opts then return false end  -- 可以选择不使用岚之力
+  local o = opts[pick]
   if not ctx:raira_spend(o.kind, o.tier) then return false end
   if forbidSame then used[o.kind .. o.tier] = true end
   if o.kind == "wind" then
@@ -78,7 +81,7 @@ return {
         if ctx:is_attack(i) then pool[#pool + 1] = i end
       end
       if #pool == 0 then return end
-      local sel = ctx:choose_cards("流转爪：选一张攻击牌置于牌库顶", pool, 1, 1)
+      local sel = ctx:choose_cards("流转爪：选一张攻击牌置于牌库顶（可不选）", pool, 0, 1)
       for _, i in ipairs(sel) do ctx:to_deck_top(i) end
     end },
 
@@ -96,7 +99,7 @@ return {
         if not ctx:card_is_goddess(i, "raira") then pool[#pool + 1] = i end
       end
       if #pool == 0 then return end
-      local sel = ctx:choose_cards("风雷的智慧：选一张非雷螺牌置于牌库顶", pool, 1, 1)
+      local sel = ctx:choose_cards("风雷的智慧：选一张非雷螺牌置于牌库顶（可不选）", pool, 0, 1)
       for _, i in ipairs(sel) do ctx:to_deck_top(i) end
     end },
 
@@ -167,9 +170,9 @@ return {
             ctx:move("dust", "distance", 1)
           end
           if ctx:choose("圆环轮回旋：风或雷 +1", { "风+1", "雷+1" }) == 1 then
-            ctx:raira_gain(ctx:player(), 1)
+            ctx:raira_gain(ctx:player(), "wind")
           else
-            ctx:raira_gain(ctx:player(), 0)
+            ctx:raira_gain(ctx:player(), "thunder")
           end
         end },
     } },
@@ -215,9 +218,9 @@ return {
       for _ = 1, 3 do
         local c = ctx:choose("大岚：选择3次", { "风+1", "雷+1", "1虚到本牌" })
         if c == 1 then
-          ctx:raira_gain(ctx:player(), 1)
+          ctx:raira_gain(ctx:player(), "wind")
         elseif c == 2 then
-          ctx:raira_gain(ctx:player(), 0)
+          ctx:raira_gain(ctx:player(), "thunder")
         else
           ctx:dust_to_card(ctx:source_inst(), 1)
         end

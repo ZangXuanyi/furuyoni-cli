@@ -52,7 +52,8 @@ return {
       { when = "expanded", query = "attack",
         apply = function(ctx, atk)
           local g = atk:source_goddess()
-          if atk:attacker() == ctx:player() and g ~= "" and g ~= "yurina" then
+          if atk:attacker() == ctx:player() and ctx:desperation(ctx:player())
+             and g ~= "" and g ~= "yurina" then
             atk:add { aura = 1, life = 1 }
             atk:keyword("overwhelm")
           end
@@ -116,8 +117,13 @@ return {
   -- 变格 A2 心
   ---------------------------------------------------------------------------
   { set = "yurina.A2", form = "A2", num = 3, name = "问答", kind = "normal", type = "attack",
-    attack = function(ctx) return { range = {2, 5}, damage = { aura = 3 }, evade = 3 } end,
+    attack = { range = { 2, 5 }, damage = { aura = 3, life = 0 } },
     on_attack_after = function(ctx)
+      -- 若对手选择由命承受伤害，则盖伏对手牌库顶三张牌。
+      if ctx:last_damage_side() == 2 then
+        for _ = 1, 3 do ctx:cover_top(ctx:opp()) end
+      end
+      -- 你执行一次基本动作，对手执行一次相同的基本动作。
       local me = ctx:player()
       local opts = ctx:legal_basics(me)
       if #opts == 0 then return end
@@ -133,7 +139,8 @@ return {
       { event = "aura_changed",
         cond = function(ctx, ev) return ev:subject() ~= ctx:player() end,
         run = function(ctx, ev)
-          local c = ctx:choose("终始", { "1虚到自装", "1虚到自气", "进行攻击【3-5 2/1】" })
+          local c = ctx:choose("终始", { "1虚到自装", "1虚到自气", "进行攻击【3-5 2/1】", "不执行" })
+          if c == 4 then return end
           if c == 1 then
             ctx:move("dust", "aura", 1, ctx:player(), ctx:player())
           elseif c == 2 then
@@ -163,7 +170,8 @@ return {
       for _, inst in ipairs(ctx:used_specials(ctx:player())) do
         if inst ~= ctx:source_inst() then pool[#pool + 1] = inst end
       end
-      local sel = ctx:choose_cards("神座渡：重置切牌", pool, 0, x)
+      local want = math.min(x, #pool)
+      local sel = ctx:choose_cards("神座渡：重置切牌", pool, want, want)
       for _, inst in ipairs(sel) do ctx:reset_special(inst) end
       ctx:add_hand_limit(ctx:player(), x)
     end },

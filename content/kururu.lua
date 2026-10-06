@@ -3,6 +3,25 @@
 -- 颜色：攻击=R 行动=B 付与=G 对应=P 全力=Y。机巧串如 "BBBPP" = 至少3蓝且至少2紫。
 -- O=络缲；A1=机器；A2=友谊。
 
+-- 骇客装置：从虚或自装取 1 个结晶放到牌上（由玩家选择）。
+local function hack_gain(ctx)
+  local inst = ctx:source_inst()
+  local me = ctx:player()
+  local d, a = ctx:dust(), ctx:aura(me)
+  if d <= 0 and a <= 0 then return end
+  if d > 0 and a > 0 then
+    if ctx:choose("骇客装置：从虚或自装取 1 个结晶？", { "虚", "自装" }) == 1 then
+      ctx:move_to_card("dust", inst, 1)
+    else
+      ctx:move_to_card("aura", inst, 1)
+    end
+  elseif d > 0 then
+    ctx:move_to_card("dust", inst, 1)
+  else
+    ctx:move_to_card("aura", inst, 1)
+  end
+end
+
 return {
 
   ---------------------------------------------------------------------------
@@ -16,9 +35,14 @@ return {
   { set = "kururu", form = "O", num = 2, name = "加速效应", kind = "normal", type = "action",
     on_play = function(ctx)
       if not ctx:keisou("BBG") then return end
+      local me = ctx:player()
       local pool = {}
-      for _, i in ipairs(ctx:hand(ctx:player())) do
-        if ctx:is_full_power(i) and not ctx:is_zenkai(i) then pool[#pool + 1] = i end
+      for _, i in ipairs(ctx:hand(me)) do
+        -- "不能使用全开的牌" = cannot use it in 全开 mode; normal use is fine.
+        -- 迟缓毒: 不能使用攻击牌。
+        if ctx:is_full_power(i) and not (ctx:is_attack(i) and ctx:attack_card_forbidden(me)) then
+          pool[#pool + 1] = i
+        end
       end
       if #pool == 0 then return end
       local sel = ctx:choose_cards("加速效应：选择一张全力牌打出（不结束回合）", pool, 1, 1)
@@ -27,6 +51,8 @@ return {
 
   { set = "kururu", form = "O", num = 3, name = "枢噜噜～", kind = "normal", type = "action",
     response = true,
+    -- 仅限对应使用：主阶段不提供。
+    playable = function(ctx) return false end,
     on_play = function(ctx)
       if ctx:responding_attack() == nil then return end
       local sel = ctx:choose_options("枢噜噜～：三选二",
@@ -61,9 +87,14 @@ return {
     full_power = true, from_cover = true,
     on_play = function(ctx)
       if not ctx:keisou("GP") then return end
+      local me = ctx:player()
       local pool = {}
-      for _, i in ipairs(ctx:used_specials(ctx:player())) do
-        if not ctx:is_full_power(i) and not ctx:card_is_goddess(i, "kururu") then pool[#pool + 1] = i end
+      for _, i in ipairs(ctx:used_specials(me)) do
+        -- 迟缓毒: 不能使用攻击牌。
+        if not ctx:is_full_power(i) and not ctx:card_is_goddess(i, "kururu")
+           and not (ctx:is_attack(i) and ctx:attack_card_forbidden(me)) then
+          pool[#pool + 1] = i
+        end
       end
       if #pool == 0 then return end
       local sel = ctx:choose_cards("回收利用：选择另一柱女神的已使用非全力切牌", pool, 1, 1)
@@ -86,14 +117,16 @@ return {
     nagi = 3,
     triggers = {
       { event = "action_resolved",
-        cond = function(ctx, ev) return ev:card() ~= ctx:source_inst() end,
+        cond = function(ctx, ev)
+          return ev:subject() == ctx:player() and ev:card() ~= ctx:source_inst()
+        end,
         run = function(ctx, ev) ctx:free_basics(ctx:player(), 1) end },
     } },
 
   { set = "kururu", form = "O", num = 7, name = "反射装置", kind = "normal", type = "enhance",
     nagi = 0,
     on_enter = function(ctx)
-      if ctx:keisou("RP") then ctx:dust_to_card(ctx:source_inst(), 4) end
+      if ctx:keisou("RP") then ctx:dust_to_card(ctx:source_inst(), ctx:keisou_amount(4)) end
     end,
     triggers = {
       { event = "attack_counted",
@@ -109,8 +142,16 @@ return {
     on_play = function(ctx) ctx:move("aura", "aura", 1, ctx:opp(), ctx:player()) end,
     triggers = {
       { event = "special_reset",
-        cond = function(ctx, ev) return ev:card() ~= ctx:source_inst() end,
-        run = function(ctx, ev) ctx:move("aura", "aura", 1, ctx:opp(), ctx:player()) end },
+        cond = function(ctx, ev)
+          -- 只有"你的"其他切牌再起/即再起才触发。
+          return ev:subject() == ctx:player() and ev:card() ~= ctx:source_inst()
+        end,
+        run = function(ctx, ev)
+          -- "可以免费使用"：可选。
+          if ctx:choose("魔能吸收：免费使用？", { "使用", "不使用" }) == 1 then
+            ctx:reuse_special(ctx:source_inst())
+          end
+        end },
     } },
 
   { set = "kururu", form = "O", num = 2, name = "大～魔像", kind = "special", type = "action",
@@ -122,7 +163,7 @@ return {
       { event = "turn_end",
         cond = function(ctx, ev) return ev:subject() == ctx:player() and ctx:keisou("YYP") end,
         run = function(ctx, ev)
-          ctx:lose_life(ctx:opp(), 1)
+          ctx:lose_life(ctx:opp(), ctx:keisou_amount(1))
           ctx:rebuild(ctx:player(), false)
         end },
     } },
@@ -130,21 +171,34 @@ return {
   { set = "kururu", form = "O", num = 3, name = "复制粘贴", kind = "special", type = "action",
     cost = 1,
     on_play = function(ctx)
-      local pool = {}
-      for _, i in ipairs(ctx:hand(ctx:player())) do
-        if ctx:is_normal_card(i) and ctx:card_name(i) ~= "复制品" then pool[#pool + 1] = i end
+      local me = ctx:player()
+      local host = ctx:source_inst()
+      -- 只在"没有选定复制哪张牌"时才封印。
+      if ctx:sealed_card(host) < 0 then
+        local pool = {}
+        for _, i in ipairs(ctx:hand(me)) do
+          if ctx:is_normal_card(i) and ctx:card_name(i) ~= "复制品" then pool[#pool + 1] = i end
+        end
+        if #pool > 0 then
+          local sel = ctx:choose_cards("复制粘贴：选择自己一张常规牌封印复制", pool, 1, 1)
+          for _, i in ipairs(sel) do ctx:seal_card(host, i) end
+        end
       end
-      if #pool > 0 then
-        local sel = ctx:choose_cards("复制粘贴：选择自己一张常规牌封印复制", pool, 1, 1)
-        for _, i in ipairs(sel) do ctx:seal_card(ctx:source_inst(), i) end
+      -- 至多同时持有 3 张「复制品」。
+      if ctx:count_named(me, "复制品") < 3 then
+        local e = ctx:gain_extra("复制品")
+        if e >= 0 then ctx:to_deck_bottom(e) end
       end
-      local e = ctx:gain_extra("复制品")
-      if e >= 0 then ctx:to_deck_bottom(e) end
     end,
-    reset = { kind = "end_turn", cond = function(ctx) return ctx:rebuilt_this_turn(ctx:player()) end } },
+    reset = { kind = "immediate", on = "rebuilt" } },
 
   { set = "kururu", form = "O", num = 901, name = "复制品", kind = "normal", type = "attack",
     extra = true,
+    -- 复制粘贴背面向上时不能使用。
+    playable = function(ctx)
+      local host = ctx:find_named(ctx:player(), "复制粘贴")
+      return host >= 0 and ctx:is_used(host)
+    end,
     attack = function(ctx)
       local host = ctx:find_named(ctx:player(), "复制粘贴")
       local sealed = (host >= 0) and ctx:sealed_card(host) or -1
@@ -157,8 +211,23 @@ return {
   { set = "kururu", form = "O", num = 4, name = "枢的神涉装置", kind = "special", type = "action",
     cost = 3,
     on_play = function(ctx)
+      local me, opp = ctx:player(), ctx:opp()
+      -- 红红蓝蓝蓝绿绿：先检视对手全部切牌，可将一张直接设为已使用（不执行效果）。
+      if ctx:keisou("RRBBBGG") then
+        if ctx:choose("神涉装置：检视对手切牌并直接设为已使用？", { "是", "否" }) == 1 then
+          ctx:reveal_opponent_cuts(me)
+          local unused = {}
+          for _, i in ipairs(ctx:special_cards(opp)) do
+            if not ctx:is_used(i) then unused[#unused + 1] = i end
+          end
+          if #unused > 0 then
+            local sel = ctx:choose_cards("选择一张设为已使用", unused, 1, 1)
+            for _, i in ipairs(sel) do ctx:set_used(i) end
+          end
+        end
+      end
       local pool = {}
-      for _, i in ipairs(ctx:used_specials(ctx:opp())) do pool[#pool + 1] = i end
+      for _, i in ipairs(ctx:used_specials(opp)) do pool[#pool + 1] = i end
       if #pool > 0 then
         local sel = ctx:choose_cards("神涉装置：选择对手一张已使用切牌免费使用", pool, 1, 1)
         for _, i in ipairs(sel) do ctx:use_foreign_card(i) end
@@ -184,8 +253,8 @@ return {
       else
         local cv = ctx:cover_cards(ctx:opp())
         if #cv > 0 then
-          local idx = ctx:random_index(#cv)
-          chosen = cv[idx]
+          local idx = ctx:random_index(#cv)  -- 0-based
+          chosen = cv[idx + 1]              -- Lua tables are 1-based
           ctx:discard_card(chosen)
         end
       end
@@ -258,7 +327,7 @@ return {
     on_play = function(ctx) ctx:move("flare", "dust", ctx:flare(ctx:player()), ctx:player(), ctx:player()) end,
     continuous = {
       { when = "used", query = "cost",
-        apply = function(ctx, atk) end },
+        apply = function(ctx, cost) cost:set(0) end },
     } },
 
   ---------------------------------------------------------------------------
@@ -282,6 +351,7 @@ return {
         a = a + ctx:keisou_amount(1)
         l = l + ctx:keisou_amount(1)
         kw[#kw + 1] = "unrespondable"
+        return { range = {2, 6}, damage = { aura = a, life = l }, keywords = kw, terminal = true }
       end
       return { range = {2, 6}, damage = { aura = a, life = l }, keywords = kw }
     end },
@@ -289,12 +359,12 @@ return {
   { set = "kururu.A2", form = "A2", num = 4, name = "枢的骇客装置", kind = "special",
     type = "action", cost = 1,
     on_play = function(ctx)
-      if ctx:keisou_other("GBP") then ctx:dust_to_card(ctx:source_inst(), 1) end
+      if ctx:keisou_other("GBP") then hack_gain(ctx) end
     end,
     triggers = {
       { event = "turn_end",
         cond = function(ctx, ev) return ev:subject() == ctx:player() and ctx:keisou_other("GBP") end,
-        run = function(ctx, ev) ctx:dust_to_card(ctx:source_inst(), 1) end },
+        run = function(ctx, ev) hack_gain(ctx) end },
     } },
 
 }

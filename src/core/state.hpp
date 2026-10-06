@@ -38,6 +38,7 @@ struct CardDef {
   int burnRequire = 0;             // 燃烧X：引擎不足 X 时不能打出
   bool isTransform = false;        // 变形光环牌（不进构筑）
   int distanceMod = 0;             // 展开中的持续距离修正（蹑足 -2）
+  int nearDistanceMod = 0;         // 达人距离修正（圈域 +1 / 引力场 -1）
   int copies = 1;                  // number of instances to create (灭灯毒 x2)
   std::string decayTo = "dust";    // where removed 献 goes (圈域 -> "distance")
   std::string text;
@@ -47,7 +48,8 @@ struct CardDef {
 struct CardInstance {
   int inst = -1;
   int def = -1;
-  Player owner = P0;
+  Player owner = P0;   // true owner: where the card goes once it leaves the field
+  Player holder = P0;  // whose zone lists currently contain it (== owner unless borrowed)
   Zone zone = Zone::Deck;
   bool faceUp = true;      // for Special: false == unused (face down), true == used
   bool assembled = false;  // for Parts: assembled (hidden from the opponent)
@@ -91,6 +93,7 @@ struct PlayerState {
   bool cutCostPermanent = false;     // 缠回 使用后：所有切牌费用 -1
   std::vector<int> parts;        // Oboro parts instances (Zone::Parts)
   std::vector<int> bag;          // Chikage 毒袋 instances (Zone::Bag)
+  bool nextDrawOne = false;  // 夜叉: the next start phase draws only one card
   bool firstTurnDone = false;
   std::vector<int> deck, hand, discard, cover, enhance, special;
 };

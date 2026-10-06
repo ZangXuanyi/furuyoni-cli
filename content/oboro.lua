@@ -123,10 +123,9 @@ return {
   { set = "oboro.A1", form = "A1", num = 2, name = "手里剑", kind = "normal", type = "attack",
     attack = { range = {3, 5}, damage = { aura = 2, life = 1 } },
     triggers = {
-      { event = "turn_end",
+      { event = "turn_end", zone = "discard",
         cond = function(ctx, ev)
-          return ev:subject() == ctx:player() and ctx:card_zone(ctx:source_inst()) == "discard" and
-                 (ctx:cover_count(0) + ctx:cover_count(1)) >= 5
+          return ev:subject() == ctx:player() and (ctx:cover_count(0) + ctx:cover_count(1)) >= 5
         end,
         run = function(ctx, ev) ctx:to_hand(ctx:source_inst()) end },
     } },
@@ -151,7 +150,9 @@ return {
     end },
 
   { set = "oboro.A1", form = "A1", num = 999, name = "最后的结晶", kind = "special",
-    type = "action", cost = 3, extra = true },
+    type = "action", cost = 3, extra = true,
+    -- 仅能在死亡窗口使用；主阶段/对应窗口不提供。
+    playable = function(ctx) return false end },
 
   ---------------------------------------------------------------------------
   -- 变格 A2 电子

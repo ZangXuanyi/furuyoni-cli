@@ -74,9 +74,10 @@ return {
       ctx:move("dust", "aura", 1, ctx:player(), ctx:player())
     end,
     triggers = {
-      { event = "weapon_switched",
+      { event = "weapon_switched", zone = "hand",
         cond = function(ctx, ev)
-          return ctx:card_zone(ctx:source_inst()) == "hand" and ev:card() ~= ctx:source_inst()
+          -- 自己以外的手段切换武器（对手切换不触发）。
+          return ev:subject() == ctx:player() and ev:card() ~= ctx:source_inst()
         end,
         run = function(ctx, ev)
           -- 展示（无机械影响），然后 1 虚到自装
@@ -185,7 +186,10 @@ return {
     nagi = 1,
     triggers = {
       { event = "normal_card_used",
-        cond = function(ctx, ev) return ctx:umbrella(ctx:player()) and ev:first() end,
+        cond = function(ctx, ev)
+          -- 只有"你"使用非雪灯的通常牌才触发（对手的使用不触发）。
+          return ctx:umbrella(ctx:player()) and ev:subject() == ctx:player() and ev:first()
+        end,
         run = function(ctx, ev)
           ctx:gain_vigor(ctx:player(), 1)
           ctx:dust_to_card(ctx:source_inst(), 3)
