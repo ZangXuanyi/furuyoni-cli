@@ -614,8 +614,11 @@ void Engine::run_rebuild(Player p) {
     if (st.over) return;
   }
   // 22-Renri A1-EX-N1 谎言的武器: 重铸牌库时，可以宣称盖牌区的一张背面牌是
-  // 「谎言的武器」，如「设置」一样打出。该宣称视作一次伪证（对手无从质疑），
-  // 结算完毕这张牌必然进入牌山（toDeckAfter），随后正常重组牌库。
+  // 「谎言的武器」，如「设置」一样打出。该宣称**视作一次完整的伪证**（2026-10-07
+  // 裁定）：对手可以质疑——未质疑按声称结算；质疑后展示该牌，若它真是
+  // 「谎言的武器」则质疑失败（对手焦躁一次），正常使用并可「回归」（移出游戏，
+  // 置回「考古」）；若不是，则宣称作罢（两效果都不执行），牌留在盖牌区。
+  // 电子设置替换整次重铸（上方提前 return），不进入本流程。
   {
     int claimDef = -1;
     if (!ps(p).cover.empty()) {
@@ -638,16 +641,50 @@ void Engine::run_rebuild(Player p) {
       const int sc = ask_one(p, std::move(cr));
       if (sc >= 1 && sc <= static_cast<int>(faces.size())) {
         const int chosen = faces[static_cast<size_t>(sc - 1)];
+        const Player o = opp(p);
+        // 视作伪证：对手可以质疑。
+        Request dr;
+        dr.kind = "doubt";
+        dr.prompt = "对手宣称盖牌中的一张牌是「" + def(claimDef).name + "」。质疑？";
+        dr.options.push_back({"不质疑", true, {{"doubt", 0}}});
+        dr.options.push_back({"质疑", true, {{"doubt", 1}}});
+        const bool doubted = ask_one(o, std::move(dr)) == 1;
+        const bool real = def_of(chosen).id == claimDef;
         const bool sa = bluffActive_, sn = bluffNotDoubted_, sf = bluffDoubtFailed_;
         const int si = bluffInst_, sd = bluffClaimDef_, spr = pendingResolveAs_;
+        if (doubted && !real) {
+          // 质疑成功：宣称作罢，牌留在盖牌区，两效果都不执行。
+          return;
+        }
+        if (doubted && real) {
+          // 质疑失败：对手焦躁一次，正常使用这张牌（它就是「谎言的武器」）。
+          ps(o).doubtFailedThisTurn = true;
+          impatience(o);
+        }
+        if (!doubted && !real) {
+          // 未质疑但牌不是武器：按声称（谎言的武器）结算。
+        }
         bluffActive_ = true;
         bluffInst_ = chosen;
         bluffClaimDef_ = claimDef;
-        bluffNotDoubted_ = true;
-        bluffDoubtFailed_ = false;
+        bluffNotDoubted_ = !doubted;
+        bluffDoubtFailed_ = doubted && real;
         pendingResolveAs_ = claimDef;
-        play_from_cover(p, chosen, false, true);  // 结算后进牌山
-        if (!st.over) fire("bluff_undoubted", p, nullptr, chosen, false);
+        play_from_cover(p, chosen, false, true);  // 如设置一样打出，结算后进牌山
+        if (!doubted && !st.over) fire("bluff_undoubted", p, nullptr, chosen, false);
+        // 回归（质疑失败时可选）：移出游戏并把「考古」置回弃牌堆。
+        if (doubted && real && !st.over && def_of(chosen).regression &&
+            ci(chosen).zone != Zone::Removed) {
+          if (ask_yes_no(p, "回归：将这张牌移出游戏，并把「考古」置回弃牌堆？")) {
+            remove_from_game(chosen);
+            for (int i = 0; i < static_cast<int>(st.insts.size()); ++i) {
+              if (ci(i).owner == p && ci(i).zone == Zone::Removed && def_of(i).kaoguReturn) {
+                move_card(i, Zone::Discard);
+                break;
+              }
+            }
+          }
+        }
         bluffActive_ = sa;
         bluffInst_ = si;
         bluffClaimDef_ = sd;

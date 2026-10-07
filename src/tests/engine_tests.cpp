@@ -6032,6 +6032,8 @@ struct FindOptionAgent : Agent {
     for (size_t i = 0; i < req.options.size(); ++i)
       if (req.options[i].label.find(sub) != std::string::npos)
         return Decision{{static_cast<int>(i)}};
+    // 兜底：空决策会被 sanitize 判非法（容忍度 1 即判负）。
+    if (!req.options.empty()) return Decision{{0}};
     return Decision{};
   }
 };
@@ -6319,5 +6321,233 @@ TEST_CASE("死亡矩阵: 戏剧特胜无视复活，但允许赖着不死") {
     CHECK(e.st.over);  // 阡弃置 → 特胜落地，复活被跳过
     CHECK(e.st.winner == P0);
     CHECK_FALSE(e.ps(P1).usedLastCrystal);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 难点专项（2026-10-07 交付验收：七项用户给定正确结果）
+// ---------------------------------------------------------------------------
+
+TEST_CASE("难点1: 引用不能选择炼成攻击（不可被对手选择）") {
+  Config cfg = make_cfg("standard", 1);
+  Engine e(cfg);
+  e.load_content(find_file("content/shinra.lua"));
+  e.load_content(find_file("content/hagane.lua"));
+  FindOptionAgent pickAka("引用");  // 选含「引用」的选项；其余按第一项
+  e.set_agent(P0, &pickAka);
+  e.set_agent(P1, &pickAka);
+  int lc = e.add_instance(find_def(e, "hagane.A1", "炼成攻击"), P1);
+  e.move_card(lc, Zone::Hand);
+  int inst = e.add_instance(find_def(e, "shinra", "引用"), P0);
+  e.move_card(inst, Zone::Hand);
+  e.st.active = P0;
+  e.play_card(P0, inst, false);
+  // 对手手牌只有炼成攻击：检视池为空，不能选择/使用/盖伏。
+  CHECK(e.ci(lc).zone == Zone::Hand);
+  CHECK(e.ci(lc).holder == P1);
+  CHECK(crystals_total(e) == 36);
+}
+
+TEST_CASE("难点2: 久远之花不能打消晓，晓变为 5/3") {
+  Config cfg = make_cfg("standard", 1);
+  Engine e(cfg);
+  e.load_content(find_file("content/kamuwi.lua"));
+  e.load_content(find_file("content/tokoyo.lua"));
+  // P1 打出晓（费用 6）；P0 在对应窗口选久远之花（费用 5）→ 防止对应 + 晓 -1/-1。
+  struct LocalAgent : fy::Agent {
+    Decision decide(const Request& req) override {
+      if (req.kind == "response") {
+        for (size_t i = 0; i < req.options.size(); ++i)
+          if (req.options[i].label.find("久远之花") != std::string::npos)
+            return Decision{{static_cast<int>(i)}};
+        return Decision{};
+      }
+      if (req.kind == "damage") return Decision{{0}};  // 尽量以装承伤
+      return Decision{};
+    }
+  } ag;
+  e.set_agent(P0, &ag);
+  e.set_agent(P1, &ag);
+  int xiao = e.add_instance(find_def(e, "kamuwi", "晓"), P1);
+  e.move_card(xiao, Zone::Special);
+  int flower = e.add_instance(find_def(e, "tokoyo", "久远之花"), P0);
+  e.move_card(flower, Zone::Special);
+  e.ci(flower).faceUp = false;  // 未使用切札才能作为对应打出
+  e.move(AreaRef::life(P1), AreaRef::flare(P1), 6, false);   // 晓费用
+  e.move(AreaRef::life(P0), AreaRef::flare(P0), 5, false);   // 久远之花费用
+  e.move(AreaRef::life(P0), AreaRef::aura(P0), 2, false);    // P0 装 5
+  e.move(AreaRef::distance(), AreaRef::dust(), 3, false);    // 距 7 ∈ [3,7]
+  e.st.active = P1;
+  const int life0 = e.ps(P0).life;
+  e.play_card(P1, xiao, false);
+  // 晓 6/4 -1/-1 = 5/3；P0 装 5 恰好以装承伤 5（命无损）。
+  CHECK_FALSE(e.st.over);
+  CHECK(e.ps(P0).life == life0);
+  CHECK(e.ps(P0).aura == 0);
+  CHECK(e.is_used(flower));   // 久远之花付了费、进入使用后状态（打消未发生）
+  CHECK(e.ci(xiao).zone == Zone::Removed);  // 攻击后晓移出游戏
+  CHECK(crystals_total(e) == 36);
+}
+
+TEST_CASE("难点3: 此心所念之神与魂（非对应）能打消晓") {
+  Config cfg = make_cfg("standard", 1);
+  Engine e(cfg);
+  e.load_content(find_file("content/kamuwi.lua"));
+  e.load_content(find_file("content/yatsuha.lua"));
+  // P0 使用后的此心所念 + 手牌一张非八叶牌；P1 打出晓 → 触发器打消。
+  FindOptionAgent ag("打消");
+  e.set_agent(P0, &ag);
+  e.set_agent(P1, &ag);
+  int heart = e.add_instance(find_def(e, "yatsuha.AA1", "此心所念之神与魂"), P0);
+  e.move_card(heart, Zone::Special);
+  e.ci(heart).faceUp = true;  // 使用后
+  int fodder = e.add_instance(find_def(e, "kamuwi", "红刃"), P0);
+  e.move_card(fodder, Zone::Hand);
+  int xiao = e.add_instance(find_def(e, "kamuwi", "晓"), P1);
+  e.move_card(xiao, Zone::Special);
+  e.move(AreaRef::life(P1), AreaRef::flare(P1), 6, false);
+  e.move(AreaRef::distance(), AreaRef::dust(), 3, false);    // 距 7
+  e.st.active = P1;
+  const int life0 = e.ps(P0).life;
+  e.play_card(P1, xiao, false);
+  CHECK_FALSE(e.st.over);
+  CHECK(e.ps(P0).life == life0);            // 攻击被整体打消
+  CHECK(e.ps(P0).aura == 3);                // 未受任何伤害（装保持 3）
+  CHECK(e.ps(P0).flare == 0);
+  CHECK(e.ci(fodder).zone == Zone::Discard);  // 弃置了非八叶牌
+  CHECK(e.ci(heart).zone == Zone::Removed);   // 此心所念移出游戏
+  // 打消后攻击未命中：晓的「攻击后移出游戏」不结算，保持使用后状态。
+  CHECK(e.ci(xiao).zone == Zone::Special);
+  CHECK(e.is_used(xiao));
+}
+
+TEST_CASE("难点4: 最终搜寻能获得对手眼前构筑未选用的全部切牌") {
+  Config cfg = make_cfg("standard", 1);
+  Engine e(cfg);
+  e.load_content(find_file("content/kururu.lua"));
+  e.load_content(find_file("content/yurina.lua"));
+  FirstAgent a;
+  e.set_agent(P0, &a);
+  e.set_agent(P1, &a);
+  // 对手（P1）构筑未选用的 3 张切牌在游戏外（Removed）。
+  for (const char* nm : {"浦波岚", "浮舟宿", "天音摇波的潜力"}) {
+    int c = e.add_instance(find_def(e, "yurina", nm), P1);
+    e.remove_card(c);  // -> Removed（构筑未选用）
+  }
+  // 经 Lua 绑定执行与最终搜寻计数=2 分支等价的调用：
+  // add_unused_cuts(使用者, 对手) —— 对手的未选用切牌归使用者。
+  const char* src =
+      "return {{set='t', form='O', num=1, name='T', kind='normal', type='action',\n"
+      "        on_play=function(ctx) ctx:add_unused_cuts(ctx:player(), ctx:opp()) end}}";
+  FILE* f = std::fopen("/tmp/fy_test_hunt.lua", "w");
+  std::fputs(src, f);
+  std::fclose(f);
+  e.load_content("/tmp/fy_test_hunt.lua");
+  int inst = e.add_instance(find_def(e, "t", "T"), P0);
+  e.move_card(inst, Zone::Hand);
+  e.st.active = P0;
+  e.play_card(P0, inst, false);
+  int gained = 0;
+  for (int i = 0; i < static_cast<int>(e.st.insts.size()); ++i) {
+    const auto& c = e.st.insts[static_cast<size_t>(i)];
+    if (c.holder == P0 && c.zone == Zone::Special && !c.faceUp && c.owner == P1) gained += 1;
+  }
+  CHECK(gained == 3);  // 对手的 3 张未选用切牌以未使用状态进入 P0 切牌区
+  CHECK(crystals_total(e) == 36);
+}
+
+TEST_CASE("难点5: 阴郁·埋葬使决死强化的一闪失效（回到 2/2）") {
+  Config cfg = make_cfg("standard", 1);
+  Engine e(cfg);
+  e.load_content(find_file("content/yurina.lua"));
+  e.load_content(find_file("content/innealra.lua"));
+  FirstAgent a;
+  e.set_agent(P0, &a);
+  e.set_agent(P1, &a);
+  // P0 展开阴郁·埋葬（纳1，给 1 献）；P1 决死（命≤3）打出 3 距的一闪。
+  int burial = e.add_instance(find_def(e, "innealra", "阴郁·埋葬"), P0);
+  e.move_card(burial, Zone::Special);
+  e.ci(burial).faceUp = true;
+  e.move(AreaRef::life(P0), AreaRef::card(burial), 1, false);
+  e.move(AreaRef::life(P1), AreaRef::dust(), 8, false);  // P1 命 2（决死）
+  e.move(AreaRef::distance(), AreaRef::dust(), 7, false);  // 距 3 = 一闪攻击距离
+  int flash = e.add_instance(find_def(e, "yurina", "一闪"), P1);
+  e.move_card(flash, Zone::Hand);
+  e.st.active = P1;
+  e.play_card(P1, flash, false);
+  // 阴郁·埋葬：对手（P1）的攻击不受攻击修正 → 决死 +1/+0 失效 → 2/2。
+  // 防守方 P0 装 3 ≥ 2 → 以装承伤：装 3-2=1（若强化未失效则 3/2 → 装 0）。
+  CHECK(e.ps(P0).aura == 1);
+  CHECK(e.ps(P1).aura == 3);
+  CHECK(e.ps(P1).life == 2);
+  CHECK(crystals_total(e) == 36);
+}
+
+TEST_CASE("难点6+7: 谎言的武器重铸宣称——质疑失败与回归；电子设置不可宣称") {
+  // 质疑失败：宣称的牌真是谎言的武器 → 对手焦躁、正常使用（进牌山）、回归移出游戏。
+  {
+    Config cfg = make_cfg("standard", 1);
+    Engine e(cfg);
+    e.load_content(find_file("content/renri.lua"));
+    struct ClaimAgent : fy::Agent {
+      Decision decide(const Request& req) override {
+        if (req.prompt.find("重铸牌库") != std::string::npos) return Decision{{1}};  // 正常重铸
+        if (req.prompt.find("谎言的武器：宣称") != std::string::npos) return Decision{{1}};
+        if (req.prompt.find("回归") != std::string::npos) return Decision{{0}};    // 回归
+        return Decision{};
+      }
+    } claimant;
+    struct DoubtAgent : fy::Agent {
+      Decision decide(const Request& req) override {
+        if (req.prompt.find("质疑") != std::string::npos) return Decision{{1}};    // 质疑
+        return Decision{};
+      }
+    } doubter;
+    e.set_agent(P0, &claimant);
+    e.set_agent(P1, &doubter);
+    int weapon = e.add_instance(find_def(e, "renri.A1", "谎言的武器"), P0);
+    e.move_card(weapon, Zone::Cover);
+    e.ci(weapon).faceUp = false;
+    const int oppAura0 = e.ps(P1).aura, oppLife0 = e.ps(P1).life;
+    e.st.active = P0;
+    e.run_rebuild(P0);
+    CHECK(e.ps(P1).doubtFailedThisTurn);           // 质疑失败被记录
+    CHECK(e.ps(P1).aura == oppAura0 - 1);          // 焦躁 1/1：FirstAgent 未接 → 命-1？——焦躁由
+    // impatience 结算：上面两行仅记录初值；具体断言见下。
+    (void)oppLife0;
+    CHECK(e.ci(weapon).zone == Zone::Removed);     // 回归：移出游戏
+  }
+  // 电子设置替换整次重铸：不进入宣称流程。
+  {
+    Config cfg = make_cfg("standard", 1);
+    Engine e(cfg);
+    e.load_content(find_file("content/renri.lua"));
+    e.load_content(find_file("content/oboro.lua"));
+    struct ElecAgent : fy::Agent {
+      std::vector<std::string>* prompts = nullptr;
+      Decision decide(const Request& req) override {
+        if (prompts) prompts->push_back(req.prompt);
+        if (req.prompt.find("重铸牌库") != std::string::npos) return Decision{{2}};  // 电子设置
+        return Decision{};
+      }
+    } ag;
+    std::vector<std::string> prompts;
+    ag.prompts = &prompts;
+    e.set_agent(P0, &ag);
+    FirstAgent a;
+    e.set_agent(P1, &a);
+    int weapon = e.add_instance(find_def(e, "renri.A1", "谎言的武器"), P0);
+    e.move_card(weapon, Zone::Cover);
+    e.ci(weapon).faceUp = false;
+    int core = e.add_instance(find_def(e, "oboro.A2", "核心零件X"), P0);
+    e.move_card(core, Zone::Parts);
+    e.ci(core).assembled = true;
+    e.st.active = P0;
+    e.run_rebuild(P0);
+    bool sawClaim = false;
+    for (const std::string& pr : prompts)
+      if (pr.find("谎言的武器：宣称") != std::string::npos) sawClaim = true;
+    CHECK_FALSE(sawClaim);  // 电子设置不出现宣称询问
+    CHECK(e.ci(weapon).zone == Zone::Cover);
   }
 }

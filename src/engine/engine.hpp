@@ -722,7 +722,10 @@ class Engine {
   void set_pending_nagi_adjust(int n) { pendingNagiAdjust_ = n; }
   int note_attack(Player p) { return ++attacksThisTurn_[p]; }
   int attacks_this_turn(Player p) const { return attacksThisTurn_[p]; }
-  void add_unused_cuts(Player p);  // 最终搜寻: unused (Removed) cuts -> special zone, unused
+  // 把 poolOwner 构筑未选用（Removed 区）的切牌以未使用状态加入 gainer 的切牌区。
+  // （最终搜寻可选对手的未选用切牌归自己；单参形式 = 自己的给自己。）
+  void add_unused_cuts(Player gainer, Player poolOwner);
+  void add_unused_cuts(Player p) { add_unused_cuts(p, p); }
   int rng_below(int n) { return st.rng.below(n); }
 
   // ---- Thallya: 蒸汽 / 气动 / 变形 ------------------------------------------

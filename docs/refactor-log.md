@@ -14,6 +14,25 @@
 | **Lua API v2** | 删除裸写入器 `set_vigor`/`set_flare`（→ `cost_vigor`/`vigor_to`/`flare_to`）；新增 `self_boost`/`reveal_cards`/`aura_damage`/`life_damage`；旧结晶入口 `move_crystals`/`add_crystals`/`amount` 标 [[deprecated]] |
 | **内部架构** | tokens.cpp（结晶/异樱唯一入口）、pipeline.cpp（命名阶段 + PlayFrame）、mechanics/（16 机制各归其文件）、effect_ctx.hpp（绑定共享层）、MechanicBit 能力注册表取代女神名前缀匹配 |
 
+## 交付验收（2026-10-07，用户七项难点全部通过）
+
+按用户给定的正确结果写的专项测试（engine_tests「难点*」），其中三处发现并修复：
+
+1. **谎言的武器的重铸宣称缺质疑流程**（原注释自认"对手无从质疑"）——补全完整伪证
+   流程：未质疑按声称结算；质疑且牌真是武器 → 对手焦躁+正常使用+回归（移出游戏、
+   置回考古）；质疑且牌不是 → 宣称作罢。电子设置替换整次重铸、不进入宣称（原正确）。
+2. **最终搜寻选"对手的"时对手自肥**——add_unused_cuts 拆为 (gainer, poolOwner)，
+   对手的未选用切牌归使用者；Lua 绑定接受可选第二参。
+3. **一闪的决死强化烘进声明值**——改为 self_boost 差值（声明期锁定），从而可被
+   阴郁·埋葬（对手的攻击不受攻击修正）无效化，符合裁定。
+
+已验证为正确的既有行为：引用不能选择炼成攻击（no_opponent_pick 过滤）；
+久远之花不能打消晓且晓变 5/3（AF_PreventResponse 王牌 -1/-1）；此心所念之神与魂
+非对应、可打消晓（attack_declared 触发器 + negate）。
+
+测试侧发现（非引擎问题）：空决策会被 sanitize 判非法（容忍度 1 即判负）——
+测试 agent 必须兜底返回合法选择；FindOptionAgent 已加兜底。
+
 ## 交付状态（2026-10-07 收官）
 
 Phase 1（Token 系统）、Phase 2（结算管线+付与新顺序）、Phase 3（16 机制拆分+

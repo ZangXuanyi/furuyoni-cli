@@ -969,8 +969,11 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["attacks_this_turn"] = [](LuaCtx& c, int p) {
     return c.e->attacks_this_turn(static_cast<Player>(p));
   };
-  ctx["add_unused_cuts"] = [](LuaCtx& c, int p) {
-    c.e->add_unused_cuts(static_cast<Player>(p));
+  // add_unused_cuts(gainer[, poolOwner])：构筑未选用（Removed）切牌以未使用
+  // 状态加入 gainer 的切牌区；缺省 poolOwner = gainer（10 最终搜寻可选对手的）。
+  ctx["add_unused_cuts"] = [](LuaCtx& c, int gainer, sol::optional<int> poolOwner) {
+    c.e->add_unused_cuts(static_cast<Player>(gainer),
+                         static_cast<Player>(poolOwner.value_or(gainer)));
   };
 
   ctx["random_index"] = [](LuaCtx& c, int n) { return c.e->rng_below(n); };

@@ -135,13 +135,16 @@ void Engine::init_barracks(Player p, const std::vector<std::pair<std::string, st
 
 
 
-void Engine::add_unused_cuts(Player p) {
+void Engine::add_unused_cuts(Player gainer, Player poolOwner) {
   std::vector<int> list;
   for (int i = 0; i < static_cast<int>(st.insts.size()); ++i)
-    if (st.insts[i].owner == p && st.insts[i].zone == Zone::Removed &&
+    if (st.insts[i].owner == poolOwner && st.insts[i].zone == Zone::Removed &&
         def_of(i).kind == CardKind::Special && !def_of(i).isExtra && !def_of(i).isPoison)
       list.push_back(i);
   for (int inst : list) {
+    // 归 gainer：转移持有权后入其切牌区（未使用）。owner 保持原值不变
+    // （离场回家规则不受影响：这些牌离场时回到构筑者手中——裁定：加入即归获得方）。
+    ci(inst).holder = gainer;
     move_card(inst, Zone::Special);
     ci(inst).faceUp = false;
   }

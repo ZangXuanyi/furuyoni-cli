@@ -10,10 +10,13 @@ return {
 
   -- 决死强化在打出（声明）那一刻判定并锁定。
   { set = "yurina", form = "O", num = 2, name = "一闪", kind = "normal", type = "attack",
-    attack = function(ctx)
-      local a = 2
-      if ctx:desperation(ctx:player()) then a = a + 1 end
-      return { range = {3, 3}, damage = { aura = a, life = 2 } }
+    attack = { range = {3, 3}, damage = { aura = 2, life = 2 } },
+    -- 决死～该牌获得+1/+0：以修正差值表达（声明期经 self_boost 锁定），
+    -- 因而可被 阴郁·埋葬（对手的攻击不受攻击修正）无效化。
+    on_play = function(ctx)
+      if ctx:desperation(ctx:player()) then
+        ctx:self_boost(function(c2, atk) atk:add { aura = 1 } end)
+      end
     end },
 
   { set = "yurina", form = "O", num = 3, name = "柄击", kind = "normal", type = "attack",

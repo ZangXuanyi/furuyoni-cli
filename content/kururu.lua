@@ -300,7 +300,7 @@ return {
         if c >= 2 then
           ctx:reveal_cards(me, opp, "cuts")  -- 查看对手的切牌（卡面：计数为 2 时）
           local who = ctx:choose("最终搜寻：加入哪一方的未选用切牌？", { "你的", "对手的" })
-          ctx:add_unused_cuts(who == 1 and ctx:player() or ctx:opp())
+          ctx:add_unused_cuts(ctx:player(), who == 1 and ctx:player() or ctx:opp())
           local e = ctx:gain_extra("壮绝旅程")
           if e >= 0 then ctx:reset_special(e) end
           ctx:remove_card(ctx:source_inst())
