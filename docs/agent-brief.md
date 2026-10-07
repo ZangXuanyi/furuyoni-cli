@@ -32,7 +32,7 @@ Lead 负责 `content/packs.json`、跨柱集成与最终验证。
   隐式触发器只在牌处于「付与区 / 已使用切札 / 变形光环」时生效；从手牌或弃牌堆触发的要写 `zone="hand"` / `zone="discard"`。
 - 静态攻击写 `attack = { range = {lo,hi}, damage = {aura=.., life=..}, keywords = {"unrespondable","overwrite"…} }`；
   动态攻击写 `attack = function(ctx) return {...} end`（**审计只检查静态的**，动态的 X 类会被跳过，但 `rules/NN-*.md` 里写死的数字必须一致）。
-- `on_play` / `on_enter` / `on_expanded`（放完献之后）/ `on_attack_after` / `on_discard` / `continuous = { { when="expanded", query="attack", apply=function(ctx, atk) … end } }` / `reset = { kind="end_turn"/"immediate", cond=function(ctx) return … end, on="<事件名>" }`。
+- `on_play` / `on_expand`（付与展开时：献落位后触发，可读最终献数）/ `on_attack_after` / `on_discard` / `continuous = { { when="expanded", query="attack", apply=function(ctx, atk) … end } }` / `reset = { kind="end_turn"/"immediate", cond=function(ctx) return … end, on="<事件名>" }`。
 - Lua 是 **strict** 的：任何运行时错误都会抛异常并判测试失败。不要调用不存在的 ctx 函数，不要索引 nil。
 - 引擎的 `ctx[...]` 注册表（`src/engine/effect_host.cpp`）是 API 的**权威**：写代码前先 `grep 'ctx\["' src/engine/effect_host.cpp` 核对函数名与参数个数。
 

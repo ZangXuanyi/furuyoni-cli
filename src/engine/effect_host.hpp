@@ -49,7 +49,7 @@ class EffectHost {
 
   bool has(int defId, const char* hook) const;
 
-  // Invoke a per-card hook (on_play / on_enter / on_discard / on_attack_after /
+  // Invoke a per-card hook (on_play / on_expand / on_discard / on_attack_after /
   // on_use_after). `who` is the controller, `inst` the resolving instance.
   void call(Engine& e, int defId, const char* hook, Player who, int inst);
 

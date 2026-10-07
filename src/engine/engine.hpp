@@ -83,6 +83,17 @@ struct Config {
   std::vector<std::string> draftPool;
 };
 
+// 伤害结算的路由（what.md 第 3 条：取代引擎全局标志，作为参数随结算传递）。
+// 由攻击关键词/卡效果在调用 apply_damage_to 前构造；一次伤害一个实例。
+struct DamageRoute {
+  int toCard = -1;              // 在此旗: 本应进入气/虚的结晶改为进入该付与牌
+  bool toDust = false;          // 强酸: 命伤结晶进入虚而非敌气
+  bool toDistance = false;      // 倒车: 本应进入气/虚的结晶改为进入距
+  bool toWaku = false;          // 惑: 本次伤害的结晶移到攻击者的惑
+  Player wakuOwner = P0;        // 该「惑」的持有者（攻击者）
+  bool auraToDistance = false;  // 残恣·嗜灭: 只把装伤侧的结晶改为进入距
+};
+
 // A live attack instance (virtual attacks included).
 struct Attack {
   Player attacker = P0;
@@ -692,11 +703,25 @@ class Engine {
   int active_transform_inst(Player p) const;  // instance of the current 变形 aura
 
   // ---- tracing / replay viewer --------------------------------------------
-  struct StackEntry {
+  // 结算栈帧：一张正在结算的牌（含其结算语境的快照）。
+  // def/owner/fromCover 用于渲染与 state_hash；ctx* 是压栈时刻的结算语境快照，
+  // 弹栈时恢复——伪证/伪装结算/全开等跨牌泄漏由此统一防护（what.md 第 3 条）。
+  struct PlayFrame {
     int def = -1;
     Player owner = P0;
     bool fromCover = false;
+    bool ctxBluffActive = false;
+    int ctxBluffInst = -1;
+    int ctxBluffClaimDef = -1;
+    bool ctxBluffNotDoubted = false;
+    bool ctxBluffDoubtFailed = false;
+    int ctxPendingResolveAs = -1;
+    bool ctxZenkai = false;
   };
+  using StackEntry = PlayFrame;  // 旧名兼容（渲染/哈希读 def/owner/fromCover）
+  // 压栈（快照结算语境）/ 弹栈（恢复）。PlayFrameGuard 配套使用。
+  void push_play_frame(int defId, Player owner, bool fromCover);
+  void pop_play_frame();
   void start_trace() {
     tracing_ = true;
     frames_ = nlohmann::json::array();
@@ -721,8 +746,6 @@ class Engine {
   bool mainDirty_ = false;
   bool abortMain_ = false;
   int pendingDamageToCard_ = -1;  // 在此旗: set on_play, snapshotted by make_attack
-  int damageToCard_ = -1;         // consumed by apply_damage_to
-  bool damageToDust_ = false;     // 强酸: 本次命伤的结晶进入虚
   // ---- 22-Renri 夜山恋离 ----------------------------------------------------
   int pendingResolveAs_ = -1;     // 本次结算改用这个 def（伪装 / 复制）
   int resolveOverrideInst_ = -1;  // 正在按其它 def 结算的实例（防止递归）
@@ -751,7 +774,7 @@ class Engine {
   bool tracing_ = false;
   nlohmann::json frames_ = nlohmann::json::array();
   std::string phase_ = "setup";
-  std::vector<StackEntry> callStack_;
+  std::vector<PlayFrame> callStack_;
   std::vector<std::pair<std::string, std::string>> draftPicks_[2];
   std::pair<std::string, std::string> draftBans_[2];
   bool hasDraft_[2] = {false, false};
@@ -775,7 +798,6 @@ class Engine {
   bool usedFullPowerThisTurn_[2] = {false, false};
   int pendingNagiAdjust_ = 0;
   bool ashuraExtraUsed_[2] = {false, false};
-  bool damageToDistance_ = false;
   bool keisouDoubled_ = false;
   bool revealOppSpecials_[2] = {false, false};
   bool forceUnrespondable_ = false;
@@ -785,9 +807,6 @@ class Engine {
   Player basicActor_ = P0;        // 执行该基本动作的玩家
   int fateResolvingSlot_ = -1;    // ctx:fate_resolving_slot()
   bool fateFromTurnStart_ = false;  // ctx:fate_from_turn_start()
-  bool damageToWaku_ = false;     // 本次伤害的结晶进入攻击者的惑
-  Player damageToWakuPlayer_ = P0;  // 该「惑」的持有者（攻击者）
-  bool damageToAuraDistance_ = false;  // 只把装伤结晶改为进入距
   bool lastAtkResponded_ = false; // 最近一次结算的攻击是否被对应过
   // 19-Megumi: 本回合的衍生攻击数、「第一次对敌命/敌装造成伤害」标记。
   int generatedAttacks_[2] = {0, 0};
@@ -832,6 +851,8 @@ class Engine {
   void setup_player_sets(Player p, const std::vector<std::string>& sets);
   void build_from_pool(Player p, std::vector<int>& normals, std::vector<int>& specials);
   void resolve_card_effect(Player p, int inst, bool asResponse, bool zenkai = false);
+  // 付与的打出效果：种植 → 给献 → 展开时 → 0 献弃置（见 pipeline.cpp）。
+  void resolve_enhance(Player p, int inst, const CardDef& d);
   void play_turn(Player p);
   void main_phase(Player p);
   void cover_phase(Player p);
@@ -843,7 +864,7 @@ class Engine {
   void break_enhances(Player p);
   void apply_damage_to(Player target, std::optional<int> aura, std::optional<int> life,
                        uint32_t keywords, int sourceInst, int chooser = -1,
-                       bool fromAttack = false);
+                       bool fromAttack = false, const DamageRoute& route = {});
   void fire_armor_full_if_new(Player p, int cause);
   bool ask_yes_no(Player p, const std::string& prompt);
   int ask_one(Player p, Request req);

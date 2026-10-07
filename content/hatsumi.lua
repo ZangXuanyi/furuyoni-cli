@@ -194,7 +194,7 @@ return {
   -- 【纳2】破绽。展开时：潜水。弃置时：攻击【1-7 -/1】不可对。
   { set = "hatsumi.A1", form = "A1", num = 4, name = "水雷", kind = "normal", type = "enhance",
     nagi = 2, breakable = true,
-    on_enter = function(ctx) dive(ctx) end,
+    on_expand = function(ctx) dive(ctx) end,
     on_discard = function(ctx)
       ctx:attack { range = { 1, 7 }, damage = { life = 1 }, keywords = { "unrespondable" } }
     end },
@@ -214,7 +214,7 @@ return {
   -- 即再起：你逆风（你的回合开始时）。
   { set = "hatsumi.A1", form = "A1", num = 4, name = "汪洋航道", kind = "special",
     type = "enhance", cost = 2, nagi = 2,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       dive(ctx)
       ctx:cower(ctx:opp())
     end,

@@ -67,7 +67,7 @@ return {
   -- 【纳1,生长1】展开时：1虚到距。展开中：当前距离增加 X（X = 本牌上的绿色结晶数）。
   { set = "megumi", form = "O", num = 5, name = "芦苇", kind = "normal", type = "enhance",
     nagi = 1, growth = 1, green_distance = true,
-    on_enter = function(ctx) ctx:move("dust", "distance", 1) end },
+    on_expand = function(ctx) ctx:move("dust", "distance", 1) end },
 
   -- 【纳1,生长2】展开中：对手回合开始时进行攻击【3-5 2/1】；你的回合开始时进行攻击【1-3 2/1】。
   -- 弃置时：对手畏缩。
@@ -92,7 +92,7 @@ return {
   --         1虚到距；对手的回合内不能移除这张牌上的结晶。
   { set = "megumi", form = "O", num = 7, name = "蔷薇", kind = "normal", type = "enhance",
     nagi = 0, growth = 2, full_power = true, keep_crystals_on_opp_turn = true,
-    on_enter = function(ctx) ctx:free_basics(ctx:player(), 1) end,
+    on_expand = function(ctx) ctx:free_basics(ctx:player(), 1) end,
     triggers = {
       { event = "turn_start",
         run = function(ctx) ctx:store_int("out", 0) end },
@@ -124,7 +124,7 @@ return {
   -- 展开中：每当对手的回合开始时进行攻击【1-5 X/1】。
   { set = "megumi", form = "O", num = 2, name = "可能性之枝", kind = "special", type = "enhance",
     cost = 3, nagi = 2, growth = 1, response = true,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       local a = ctx:responding_attack()
       if not a then return end
       local x = ctx:total_green_on_enhances(ctx:player())
@@ -193,7 +193,7 @@ return {
   -- A1-N2 假想打击：【纳3】展开时/破弃时：进行【5-6 3/1】的攻击。
   { set = "megumi.A1", form = "A1", num = 2, name = "假想打击", kind = "normal", type = "enhance",
     nagi = 3,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       ctx:attack { range = { 5, 6 }, damage = { aura = 3, life = 1 } }
     end,
     on_discard = function(ctx)

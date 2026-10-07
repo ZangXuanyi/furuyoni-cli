@@ -127,7 +127,7 @@ content     每套卡组一个 Lua 模块（数据 + 行为）
 | `nagi` | 付与“纳 X”|
 | `full_power` / `response` / `breakable` / `terminal` | 全力 / 对应 / 破绽 / 终端（`break` 是关键字，故用 `breakable`）|
 | `attack` | `{ range = {lo,hi} 或 {{lo,hi},...}, damage = { aura = n|fn, life = n|fn }, keywords = {"unrespondable","lock","overwhelm"} }` |
-| `on_play` / `on_enter` / `on_discard` / `on_attack_after` / `on_use_after` | 行为钩子（`function(ctx) ... end`）|
+| `on_play` / `on_expand` / `on_discard` / `on_attack_after` / `on_use_after` | 行为钩子（`function(ctx) ... end`；`on_expand` 在献落位后触发）|
 | `continuous` | `{ { when="expanded"|"used"|"always", query="attack", apply=function(ctx, atk) ... end } }` |
 | `reset` | `{ kind="end_turn"|"immediate", at_least=n }` 或 `{ kind="end_turn", cond=function(ctx) ... end }` |
 

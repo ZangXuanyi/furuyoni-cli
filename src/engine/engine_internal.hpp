@@ -104,11 +104,10 @@ inline std::string goddess_display(const std::string& g, const std::string& form
   return g;
 }
 
-struct StackGuard {
-  std::vector<Engine::StackEntry>& v;
-  ~StackGuard() {
-    if (!v.empty()) v.pop_back();
-  }
+// 结算栈帧守卫：构造时压栈（快照结算语境），析构时弹栈并恢复语境。
+struct PlayFrameGuard {
+  Engine& e;
+  ~PlayFrameGuard() { e.pop_play_frame(); }
 };
 
 }  // namespace detail

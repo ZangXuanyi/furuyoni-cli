@@ -125,7 +125,7 @@ return {
   -- 对应【纳3】终端。展开时：打消被对应的攻击。展开中：你的士兵和其他女神的攻击 +0/+1。
   { set = "mizuki", form = "O", num = 1, name = "天主八龙阁", kind = "special", type = "enhance",
     cost = 5, nagi = 3, response = true, terminal = true,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       local a = ctx:responding_attack()
       if a then a:negate() end
     end,

@@ -51,13 +51,13 @@ return {
 
   { set = "tokoyo", form = "O", num = 6, name = "风舞台", kind = "normal", type = "enhance",
     nagi = 2,
-    on_enter = function(ctx) ctx:move("distance", "aura", 2, ctx:player(), ctx:player()) end,
+    on_expand = function(ctx) ctx:move("distance", "aura", 2, ctx:player(), ctx:player()) end,
     on_discard = function(ctx) ctx:move("aura", "distance", 2, ctx:player(), ctx:player()) end },
 
   -- 终端（结束主要阶段）；展开时集中力变 2；弃置时生成攻击。
   { set = "tokoyo", form = "O", num = 7, name = "晴舞台", kind = "normal", type = "enhance",
     nagi = 2, terminal = true,
-    on_enter = function(ctx) ctx:set_vigor(ctx:player(), 2) end,
+    on_expand = function(ctx) ctx:set_vigor(ctx:player(), 2) end,
     on_discard = function(ctx) ctx:attack { range = {3, 6}, damage = { life = 1 } } end },
 
   -- 切

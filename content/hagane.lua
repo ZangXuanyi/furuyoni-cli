@@ -66,7 +66,7 @@ return {
 
   { set = "hagane", form = "O", num = 7, name = "引力场", kind = "normal", type = "enhance",
     nagi = 2, zenkai = true,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       local n = ctx:zenkai() and 2 or 1
       ctx:move("distance", "aura", n, ctx:player(), ctx:player())
     end,

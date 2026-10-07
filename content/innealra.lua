@@ -72,7 +72,7 @@ return {
   -- O-N7 变迁：对应【纳1】。展开时：1虚到自装。弃置时：轮转命运。
   { set = "innealra", form = "O", forms = { "O", "A1", "A2" }, num = 7, name = "变迁",
     kind = "normal", type = "enhance", nagi = 1, response = true,
-    on_enter = function(ctx) ctx:move("dust", "aura", 1, ctx:player(), ctx:player()) end,
+    on_expand = function(ctx) ctx:move("dust", "aura", 1, ctx:player(), ctx:player()) end,
     on_discard = function(ctx) ctx:rotate_fates() end },
 
   -- O-S4 造物诺伦神的万劫缠迫（5）：全力【纳5】展开时：盖伏任意多手牌，执行至多
@@ -81,7 +81,7 @@ return {
   { set = "innealra", form = "O", forms = { "O", "A1", "A2" }, num = 4,
     name = "造物诺伦神的万劫缠迫", kind = "special", type = "enhance",
     cost = 5, nagi = 5, full_power = true, no_reuse = true, fate_entangler = true,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       local me = ctx:player()
       local hand = ctx:hand(me)
       local sel = {}
@@ -140,7 +140,7 @@ return {
   -- O1-N6 哀愁意志【纳2】展开时&弃置时：对手弃一张手牌或一张盖牌。
   { set = "innealra", form = "O", num = 6, name = "哀愁意志", kind = "normal",
     type = "enhance", nagi = 2,
-    on_enter = function(ctx) enemy_discards_one(ctx, "哀愁意志") end,
+    on_expand = function(ctx) enemy_discards_one(ctx, "哀愁意志") end,
     on_discard = function(ctx) enemy_discards_one(ctx, "哀愁意志") end },
 
   -- O1-S1 神枪·衰朽（2）【(4-X)-(4+Y) -/1】X = 对手用过的王牌数量，
@@ -219,7 +219,7 @@ return {
   -- 对手攻击结算完毕后，对敌装造成 1 伤害。
   { set = "innealra.A1", form = "A1", num = 2, name = "阵雨·覆逆", kind = "special",
     type = "enhance", cost = 5, nagi = 1, response = true,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       -- 以对应打出的这一次：攻击的连续修正已在声明时结算，这里补上 -1/+0。
       local atk = ctx:responding_attack()
       if atk then atk:add { aura = -1 } end
@@ -291,7 +291,7 @@ return {
   -- 展开中：这张牌上的樱花结晶被移除时，不移到虚，而移到惑。
   { set = "innealra.A2", form = "A2", num = 6, name = "虚幻意志", kind = "normal",
     type = "enhance", nagi = 2, decay_to = "waku",
-    on_enter = function(ctx) optional_rotate(ctx, "虚幻意志") end,
+    on_expand = function(ctx) optional_rotate(ctx, "虚幻意志") end,
     on_discard = function(ctx) optional_rotate(ctx, "虚幻意志") end },
 
   -- O3-S1 神枪·永世（2）【0-2 2/1】若你使用此牌时支付了费用，将费用移到惑。
@@ -307,7 +307,7 @@ return {
   -- 移到惑。展开时：这张牌的献可以从距中选择。
   { set = "innealra.A2", form = "A2", num = 2, name = "舍弃·希冀", kind = "special",
     type = "enhance", cost = 2, nagi = 1, response = true, nagi_from_distance = true,
-    on_enter = function(ctx) ctx:cost_to_waku() end },
+    on_expand = function(ctx) ctx:cost_to_waku() end },
 
   -- O3-S3 宇宙·幽邃（0）：对应。你可以轮转命运。1 自装到惑，或 1 惑到自装。
   -- 使用后：每回合准备阶段开始时，进行攻击"【0-10 1/1】攻击后：若上述攻击造成了

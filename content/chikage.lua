@@ -88,7 +88,7 @@ return {
 
   { set = "chikage", form = "O", num = 2, name = "缠毒揭叛旗", kind = "special", type = "enhance",
     nagi = 5, response = true,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       -- 打出即打消"被对应的这次攻击"（若它属于 X/- 或 -/Y 类）。
       local a = ctx:responding_attack()
       if a then

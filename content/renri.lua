@@ -142,7 +142,7 @@ return {
   -- 【纳3】展开时 & 弃置时: 若距离 >= 2，则 1距到虚。
   { set = "renri", form = "O", num = 7, name = "蛊惑", kind = "normal", type = "enhance",
     nagi = 3,
-    on_expanded = function(ctx)
+    on_expand = function(ctx)
       if ctx:distance() >= 2 then ctx:move("distance", "dust", 1) end
     end,
     on_discard = function(ctx)
@@ -234,7 +234,7 @@ return {
   { set = "renri", form = "O", num = 4, name = "夜山恋离的终幕", kind = "special",
     type = "enhance", cost = 1, nagi = 3, terminal = true,
     enemy_crystal_immune = true,
-    on_expanded = function(ctx) ctx:gain_extra("铭镌之衣") end,
+    on_expand = function(ctx) ctx:gain_extra("铭镌之衣") end,
     triggers = {
       { event = "turn_start",
         cond = function(ctx, ev) return ev:subject() == ctx:player() end,

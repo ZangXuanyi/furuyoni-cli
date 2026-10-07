@@ -6,6 +6,8 @@
 #include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -340,16 +342,12 @@ uint64_t Engine::state_hash() const {
   putb(zenkaiActive_);
   putb(poisonForce_);
   put(pendingNagiAdjust_);
-  putb(damageToDistance_);
   putb(keisouDoubled_);
   putb(forceUnrespondable_);
   put(externalAdded_);
-  // 26-Innealra: 瞬态结算状态（命运槽解析 / 伤害去向 / 被对应标记）
+  // 26-Innealra: 瞬态结算状态（命运槽解析 / 被对应标记）；伤害路由已是参数
   put(fateResolvingSlot_);
   putb(fateFromTurnStart_);
-  putb(damageToWaku_);
-  put(static_cast<int>(damageToWakuPlayer_));
-  putb(damageToAuraDistance_);
   putb(lastAtkResponded_);
   putb(inBasicAction_);
   put(static_cast<int>(basicActor_));

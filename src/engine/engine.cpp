@@ -2296,8 +2296,8 @@ void Engine::tree_use_cut(Player p, int inst) {
   ci(inst).faceUp = true;  // 公开使用
   ci(inst).usedThisTurn = true;
   ps(p).cardsPlayedTotal += 1;
-  callStack_.push_back({d.id, p, false});
-  StackGuard stackGuard{callStack_};
+  push_play_frame(d.id, p, false);
+  PlayFrameGuard frameGuard{*this};
   resolve_card_effect(p, inst, false);
   remove_card(inst);  // 使用后将该切牌移出游戏
 }
@@ -3184,20 +3184,18 @@ void Engine::flush_drama_advances() {
     if (!pendingAdvance_[pi]) continue;
     pendingAdvance_[pi] = false;
     const bool tier = pendingAdvanceTier_[pi];
+    // 推进地图会触发玩家决策/事件；「最近一次伤害/攻击」记录跨过该窗口保存，
+    // 供之后的即再起/攻击后谓词读取。伤害路由已是参数（DamageRoute），无需保存。
     const int sDmgSide = lastDmgSide_, sDmgAmount = lastDmgAmount_;
     const bool sDmgFrom = lastDmgFromAttack_;
     const int sAtkSide = lastAtkSide_, sAtkAmount = lastAtkAmount_;
-    const bool sToDist = damageToDistance_, sToDust = damageToDust_;
-    const int sToCard = damageToCard_, sPendCard = pendingDamageToCard_;
+    const int sPendCard = pendingDamageToCard_;
     advance_node(static_cast<Player>(pi), tier);
     lastDmgSide_ = sDmgSide;
     lastDmgAmount_ = sDmgAmount;
     lastDmgFromAttack_ = sDmgFrom;
     lastAtkSide_ = sAtkSide;
     lastAtkAmount_ = sAtkAmount;
-    damageToDistance_ = sToDist;
-    damageToDust_ = sToDust;
-    damageToCard_ = sToCard;
     pendingDamageToCard_ = sPendCard;
     if (st.over) return;
   }

@@ -115,13 +115,13 @@ return {
   -- 展开中：若此牌上的樱花结晶将被移除，将其移至敌气而非虚。
   { set = "akina", form = "O", num = 6, name = "乱拨", kind = "normal", type = "enhance",
     nagi = 2, limit_distance = { 0, 3 }, decay_to = "enemy_flare",
-    on_enter = function(ctx) ctx:move("flare", "distance", 2, ctx:opp(), ctx:opp()) end },
+    on_expand = function(ctx) ctx:move("flare", "distance", 2, ctx:opp(), ctx:opp()) end },
 
   -- 全力【纳2】投资券。破绽。展开时：1 敌装到自装，你可以支付 1 集中力再执行一次。
   -- 弃置时：进行攻击【2-5 1/0】。
   { set = "akina", form = "O", num = 7, name = "直接金融", kind = "normal", type = "enhance",
     nagi = 2, full_power = true, breakable = true, investment_ticket = true,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       local me = ctx:player()
       ctx:move("aura", "aura", 1, ctx:opp(), me)
       if ctx:vigor(me) >= 1 then
@@ -169,7 +169,7 @@ return {
   { set = "akina", form = "O", num = 3, name = "仙霄鬼泉天元术", kind = "special",
     type = "enhance",
     cost = 1, nagi = 1, crystal_shield = true,
-    on_enter = function(ctx) ctx:move("life", "flare", 4, ctx:player(), ctx:player()) end,
+    on_expand = function(ctx) ctx:move("life", "flare", 4, ctx:player(), ctx:player()) end,
     on_death = function(ctx)
       local me = ctx:player()
       local inst = ctx:source_inst()

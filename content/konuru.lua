@@ -72,7 +72,7 @@ return {
 
   { set = "konuru", form = "O", num = 6, name = "冻僵", kind = "normal", type = "enhance",
     nagi = 2, enemy_no_flare = true,
-    on_enter = function(ctx) ctx:freeze(ctx:opp(), 1) end },
+    on_expand = function(ctx) ctx:freeze(ctx:opp(), 1) end },
 
   { set = "konuru", form = "O", num = 7, name = "寒冰荆棘", kind = "normal", type = "enhance",
     nagi = 2, may_skip_crystal_loss = true,
@@ -133,7 +133,7 @@ return {
         ctx:move("flare", "dust", 4, ctx:player(), ctx:player())
       end
     end,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       ctx:move("distance", "dust", 1)
       ctx:freeze(ctx:opp(), 1)
     end,
@@ -154,7 +154,7 @@ return {
   ---------------------------------------------------------------------------
   { set = "konuru.A1", form = "A1", num = 6, name = "冰凌包覆", kind = "normal",
     type = "enhance", nagi = 0, full_power = true, ice_as_armor = true,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       local me = ctx:player()
       ctx:move_to_card("dust", ctx:source_inst(), 5)  -- 5虚到这张牌上
       local n = 0

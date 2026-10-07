@@ -293,7 +293,7 @@ return {
   -- 心胸所念 → 双掌生花 → 新幕来临
   { set = "honoka", form = "O", num = 907, name = "双掌生花", kind = "special", type = "enhance",
     cost = 0, full_power = true, extra = true, absorb_aura_basic = true,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       -- 打出时的那次装附不替换（引擎在装附时询问是否放到此牌上）。
       ctx:set_aura_redirect_suppressed(true)
       ctx:do_basic(ctx:player(), "aura")

@@ -139,7 +139,7 @@ return {
   -- 弃置时：你获得 1 集中力。（卡面「若当前剧目颜色是哦红」文本残缺，见交付报告。）
   { set = "kanawe", form = "O", num = 7, name = "封杀", kind = "normal", type = "enhance",
     nagi = 3, breakable = true, cut_ban = true,
-    on_enter = function(ctx) ctx:declare_cut_ban() end,
+    on_expand = function(ctx) ctx:declare_cut_ban() end,
     on_discard = function(ctx) ctx:gain_vigor(ctx:player(), 1) end },
 
   ---------------------------------------------------------------------------

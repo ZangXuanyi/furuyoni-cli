@@ -134,7 +134,7 @@ return {
   ---------------------------------------------------------------------------
   { set = "thallya.A1", form = "A1", num = 5, name = "快速改装", kind = "normal", type = "enhance",
     nagi = 3,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       ctx:recover(ctx:player(), 1)
       local pool = ctx:transform_cards(ctx:player())
       if #pool > 0 then

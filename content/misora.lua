@@ -152,7 +152,7 @@ return {
   -- 弃置时：本回合内当前距离 +1、达人距离 +1。
   { set = "misora", form = "O", num = 7, name = "空之翼", kind = "normal", type = "enhance",
     nagi = 2, terminal = true, limit_distance = { 0, 3 },
-    on_enter = function(ctx) ctx:move("aura", "distance", 2, ctx:opp()) end,
+    on_expand = function(ctx) ctx:move("aura", "distance", 2, ctx:opp()) end,
     on_discard = function(ctx)
       ctx:add_temp_distance(ctx:player(), 1)
       ctx:add_temp_near_distance(ctx:player(), 1)
@@ -194,7 +194,7 @@ return {
   -- 弃置时：将此牌封印的牌置入对手的弃牌堆。
   { set = "misora", form = "O", num = 3, name = "惴息悬影", kind = "special", type = "enhance",
     cost = 2, nagi = 3, response = true,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       local atk = ctx:responding_attack()
       if not atk then return end
       if not atk:from_normal() then return end

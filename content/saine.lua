@@ -34,7 +34,7 @@ return {
 
   { set = "saine", form = "O", num = 6, name = "冲音晶", kind = "normal", type = "enhance",
     nagi = 1, response = true,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       local a = ctx:responding_attack()
       if a then a:add { aura = -1 } end
     end,
@@ -116,7 +116,7 @@ return {
           end
         end },
     },
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       if ctx:used_special_count(ctx:player(), "saine") > 0 then
         ctx:add_cut_cost_delta(ctx:player(), -1)
       end

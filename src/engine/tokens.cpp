@@ -9,6 +9,7 @@
 // 旧入口 add_crystals/move_crystals/gain_external/lose_external/burn/recover/
 // freeze/thaw/seed_to_plant/attach_green/detach_green_to_seeds/add_wound 均已
 // 变为 token_adjust/token_move 的薄包装。
+#include <cstdio>
 #include <limits>
 
 #include "engine/engine_internal.hpp"

@@ -5808,3 +5808,57 @@ TEST_CASE("诺伦: 阵雨·覆逆作为对应打出时给被对应的攻击 -1/+
   CHECK(e.ci(ri).crystals == 1);    // 纳1
   for (const std::string& v : check_invariants(e)) CHECK_MESSAGE(false, v);
 }
+
+// ---------------------------------------------------------------------------
+// 付与打出效果的新顺序（what.md 裁定 2026-10-07）：种植 → 给献 → 展开时 →
+// 0 献弃置。展开时是单一钩子，在献落位后触发（可读最终献数）。
+// ---------------------------------------------------------------------------
+
+TEST_CASE("付与顺序: 展开时获得的装不能再支付纳（引力场）") {
+  Config cfg = make_cfg("standard", 1);
+  Engine e(cfg);
+  e.load_content(find_file("content/hagane.lua"));
+  FirstAgent a;
+  e.set_agent(P0, &a);
+  e.set_agent(P1, &a);
+  int def = find_def(e, "hagane", "引力场");  // 全开【纳2】展开时: 距→自装 2
+  REQUIRE(def >= 0);
+  int inst = e.add_instance(def, P0);
+  e.move_card(inst, Zone::Hand);
+  e.st.active = P0;
+  // 装清空、虚 2、距 10：旧序（展开时先得 2 装、纳再从中支付、FirstAgent 选
+  // dust0+aura2）终态为 aura=0/dust=2；新序（纳先从虚付清）终态为 aura=2/dust=0。
+  e.move_crystals(AreaRef::aura(P0), AreaRef::flare(P0), e.st.p[P0].aura);
+  e.move_crystals(AreaRef::life(P1), AreaRef::dust(), 2);
+  e.play_card(P0, inst, false, /*zenkai=*/true);
+  CHECK(e.st.p[P0].aura == 2);   // 展开时的 距→自装 2 落在纳之后
+  CHECK(e.st.dust == 0);         // 纳2 已先行从虚付清
+  CHECK(e.st.distance == 8);
+  CHECK(e.card_crystal_count(inst) == 2);
+  CHECK(crystals_total(e) == 36);
+  for (const std::string& v : check_invariants(e)) CHECK_MESSAGE(false, v);
+}
+
+TEST_CASE("付与顺序: 展开时可读最终献数（寄花）") {
+  Config cfg = make_cfg("standard", 1);
+  Engine e(cfg);
+  e.load_content(find_file("content/yatsuha.lua"));
+  FirstAgent a;
+  e.set_agent(P0, &a);
+  e.set_agent(P1, &a);
+  int def = find_def(e, "yatsuha", "寄花");  // 纳3 破绽 展开时: 移 X(=镜映) 个献到虚
+  REQUIRE(def >= 0);
+  int inst = e.add_instance(def, P0);
+  e.move_card(inst, Zone::Hand);
+  e.st.active = P0;
+  // 镜映 = 1（仅命相等；装/气错开）。装清空使纳3 只能从虚支付（虚取自距，守恒）。
+  e.move_crystals(AreaRef::aura(P0), AreaRef::flare(P0), 3);
+  e.move_crystals(AreaRef::distance(), AreaRef::dust(), 3);
+  CHECK(e.mirror(P0) >= 1);
+  e.play_card(P0, inst, false);
+  // 献先落位（3），展开时再移走 mirror() 个到虚。
+  CHECK(e.card_crystal_count(inst) == 3 - e.mirror(P0));
+  CHECK(e.st.dust == e.mirror(P0));
+  CHECK(crystals_total(e) == 36);
+  for (const std::string& v : check_invariants(e)) CHECK_MESSAGE(false, v);
+}

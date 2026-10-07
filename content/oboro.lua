@@ -104,7 +104,7 @@ return {
 
   { set = "oboro", form = "O", num = 3, name = "虚鱼", kind = "special", type = "enhance",
     nagi = 3,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       local pile = ctx:discard_pile(ctx:player())
       if #pile == 0 then return end
       local sel = ctx:choose_cards("虚鱼：从弃牌堆选任意数量盖伏", pile, 0, #pile)

@@ -158,7 +158,7 @@ return {
   -- 弃置时：进行攻击"【1-4 0/0】攻击后：2敌装到自装"。
   { set = "yatsuha", form = "O", num = 7, name = "寄花", kind = "normal", upgrade = "徒寄花", type = "enhance",
     nagi = 3, breakable = true,
-    on_expanded = function(ctx)
+    on_expand = function(ctx)
       ctx:drain_card_crystals(ctx:source_inst(), ctx:mirror())
     end,
     on_discard = function(ctx)
@@ -347,7 +347,7 @@ return {
       -- 第一张牌则不从虚/装取献
       return ctx:cards_played_total(ctx:player()) == 1 and 0 or 1
     end,
-    on_expanded = function(ctx)
+    on_expand = function(ctx)
       if ctx:cards_played_total(ctx:player()) == 1 then
         ctx:external_to_card(ctx:source_inst(), 1)  -- 从游戏外获取一片结晶
       end

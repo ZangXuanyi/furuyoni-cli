@@ -113,7 +113,7 @@ return {
 
   { set = "shinra", form = "O", num = 7, name = "论破", kind = "normal", type = "enhance",
     nagi = 4,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       local pile = {}
       for _, i in ipairs(ctx:discard_pile(ctx:opp())) do
         if ctx:opponent_pickable(i) then pile[#pile + 1] = i end
@@ -186,7 +186,7 @@ return {
 
   { set = "shinra", form = "O", num = 4, name = "森罗判证", kind = "special", type = "enhance",
     nagi = 6,
-    on_enter = function(ctx) ctx:move("dust", "life", 2, ctx:player(), ctx:player()) end,
+    on_expand = function(ctx) ctx:move("dust", "life", 2, ctx:player(), ctx:player()) end,
     triggers = {
       { event = "enhance_left",
         cond = function(ctx, ev)
@@ -238,7 +238,7 @@ return {
           end }
       end
     end,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       if ctx:vigor(ctx:player()) >= 1 then
         if ctx:choose("使徒：支付 1 集中力并重新准备计策？", { "是", "否" }) == 1 then
           ctx:set_vigor(ctx:player(), ctx:vigor(ctx:player()) - 1)

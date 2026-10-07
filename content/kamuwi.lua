@@ -130,7 +130,7 @@ return {
   -- 【纳2】破绽。诅咒1：展开时攻击【3 2/2】锁定。进入敌装的结晶改为进虚。
   { set = "kamuwi", form = "O", num = 7, name = "血飞沫", kind = "normal", type = "enhance",
     nagi = 2, breakable = true, deny_enemy_aura = true,
-    on_expanded = function(ctx)
+    on_expand = function(ctx)
       if self_curse(ctx, 1, "血飞沫：诅咒1，进行攻击【3 2/2】锁定？") then
         ctx:attack { range = { 3, 3 }, damage = { aura = 2, life = 2 }, keywords = { "lock" } }
       end
@@ -150,7 +150,7 @@ return {
   -- 【纳4】诅咒2：展开时攻击【3-4 3/3】通常牌不可对，并对自命造成1伤害。本牌弃置前对手不会死亡。
   { set = "kamuwi", form = "O", num = 2, name = "阡", kind = "special", type = "enhance",
     cost = 3, nagi = 4, protects_enemy = true,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       if not self_curse(ctx, 2, "阡：诅咒2，进行攻击【3-4 3/3】？") then return end
       ctx:attack { range = { 3, 4 }, damage = { aura = 3, life = 3 },
                    keywords = { "no_normal_response" } }

@@ -97,7 +97,7 @@ return {
 
   { set = "yukihi", form = "O", num = 7, name = "结缘", kind = "normal", type = "enhance",
     nagi = 2,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       if ctx:umbrella(ctx:player()) then
         ctx:move("distance", "dust", 1)
       else

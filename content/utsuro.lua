@@ -78,7 +78,7 @@ return {
 
   { set = "utsuro", form = "O", num = 7, name = "遗灰咒", kind = "normal", type = "enhance",
     nagi = 2, full_power = true,
-    on_enter = function(ctx) ctx:move("aura", "dust", 3, ctx:opp(), ctx:opp()) end,
+    on_expand = function(ctx) ctx:move("aura", "dust", 3, ctx:opp(), ctx:opp()) end,
     on_discard = function(ctx)
       if not jin(ctx) then return end
       local opp = ctx:opp()

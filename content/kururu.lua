@@ -125,7 +125,7 @@ return {
 
   { set = "kururu", form = "O", num = 7, name = "反射装置", kind = "normal", type = "enhance",
     nagi = 0,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       if ctx:keisou("RP") then ctx:dust_to_card(ctx:source_inst(), ctx:keisou_amount(4)) end
     end,
     triggers = {

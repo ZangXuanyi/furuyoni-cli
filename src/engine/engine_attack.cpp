@@ -363,7 +363,8 @@ void Engine::apply_compass(Attack& a) const {
 }
 
 void Engine::apply_damage_to(Player target, std::optional<int> aura, std::optional<int> life,
-                             uint32_t keywords, int sourceInst, int chooser, bool fromAttack) {
+                             uint32_t keywords, int sourceInst, int chooser, bool fromAttack,
+                             const DamageRoute& route) {
   (void)sourceInst;
   std::optional<int> effA = aura, effL = life;
   if (effA && !(keywords & AF_Overwhelm)) *effA = std::min(*effA, 5);
@@ -374,19 +375,12 @@ void Engine::apply_damage_to(Player target, std::optional<int> aura, std::option
   if (has_damage_immunity(target)) {  // 夙愿: 你不会受到任何伤害
     lastDmgSide_ = 0;
     lastDmgAmount_ = 0;
-    damageToDistance_ = false;
-    damageToDust_ = false;
-    damageToWaku_ = false;
-    damageToAuraDistance_ = false;
     return;
   }
-  // 在此旗: 本应进入气/虚的结晶改为进入该付与牌。作为伤害结算的第一个原子
-  // 操作执行，因此后续的 attack_resolved / on_resolve 触发不会插入其间。
-  const int toCard = damageToCard_;
-  damageToCard_ = -1;
-  // 26-Innealra 星空 / 宇宙·幽邃: 本次伤害本应移动的樱花结晶全部进入攻击者的惑。
-  const bool toWaku = damageToWaku_;
-  const Player wakuOwner = damageToWakuPlayer_;
+  // 路由快照（在此旗 / 惑）作为伤害结算的第一个原子操作读取。
+  const int toCard = route.toCard;
+  const bool toWaku = route.toWaku;
+  const Player wakuOwner = route.wakuOwner;
   auto doAura = [&](int n) {
     // Record the chosen side *before* resolving: on_life_loss / 即再起
     // predicates read last_damage_side during the damage.
@@ -433,7 +427,7 @@ void Engine::apply_damage_to(Player target, std::optional<int> aura, std::option
       for (int inst : sp2) drain(inst);
       if (remaining > 0)
         move_crystals(AreaRef::aura(target), AreaRef::waku(wakuOwner), remaining, false);
-    } else if (damageToDistance_ || damageToAuraDistance_) {
+    } else if (route.toDistance || route.auraToDistance) {
       move_crystals(AreaRef::aura(target), AreaRef::distance(), n, false);
     } else {
       spend_aura(target, n);
@@ -444,8 +438,8 @@ void Engine::apply_damage_to(Player target, std::optional<int> aura, std::option
     int before = ps(target).life;
     // 惑(26) > 倒车(距) > 强酸(虚) > 通常(敌气)
     AreaKind to = toWaku ? AreaKind::Waku
-                         : (damageToDistance_ ? AreaKind::Distance
-                                             : (damageToDust_ ? AreaKind::Dust : AreaKind::Flare));
+                         : (route.toDistance ? AreaKind::Distance
+                                             : (route.toDust ? AreaKind::Dust : AreaKind::Flare));
     damage_life(target, n, to, true, toCard, toWaku ? static_cast<int>(wakuOwner) : -1);
     lastDmgAmount_ = before - ps(target).life;
   };
@@ -476,10 +470,6 @@ void Engine::apply_damage_to(Player target, std::optional<int> aura, std::option
   } else if (effL) {
     doLife(*effL);
   }
-  damageToDistance_ = false;
-  damageToDust_ = false;
-  damageToWaku_ = false;
-  damageToAuraDistance_ = false;
   const int dmgSide = lastDmgSide_;
   const int dmgAmount = lastDmgAmount_;
   check_win();
@@ -809,23 +799,20 @@ void Engine::resolve_attack(Attack& a) {
   std::optional<int> effL = a.life;
   if (effA) *effA += a.auraDelta;
   if (effL) *effL += a.lifeDelta;
-  damageToDistance_ = (a.keywords & AF_ToDistance) != 0;
-  damageToDust_ = a.lifeDamageToDust;  // 强酸
-  damageToWaku_ = (a.keywords & AF_ToWaku) != 0;      // 26-Innealra 星空/宇宙·幽邃
-  damageToWakuPlayer_ = a.attacker;
-  damageToAuraDistance_ = (a.keywords & AF_AuraToDistance) != 0;  // 残恣·嗜灭
-  damageToCard_ = a.damageToCard;
+  // 本次攻击的伤害路由（取代引擎全局标志）。
+  DamageRoute route;
+  route.toDistance = (a.keywords & AF_ToDistance) != 0;
+  route.toDust = a.lifeDamageToDust;  // 强酸
+  route.toWaku = (a.keywords & AF_ToWaku) != 0;      // 26-Innealra 星空/宇宙·幽邃
+  route.wakuOwner = a.attacker;
+  route.auraToDistance = (a.keywords & AF_AuraToDistance) != 0;  // 残恣·嗜灭
+  route.toCard = a.damageToCard;
   if (a.wound) {
     // 24-Shisui 裂伤攻击: 不进行常规伤害结算，改为向区域塞入裂伤指示物
     // （受到裂伤时不移动装结晶）。造成裂伤 ≠ 造成伤害，但承伤侧的选择照常
     // 对「攻击后」可见。
     apply_wound_attack_damage(target, a.attacker, effA, effL,
                               a.attackerChoosesDamage ? a.attacker : -1);
-    damageToDistance_ = false;
-    damageToDust_ = false;
-    damageToWaku_ = false;
-    damageToAuraDistance_ = false;
-    damageToCard_ = -1;
     a.hit = true;
     fire("attack_resolved", a.attacker, &a, -1, false);
     effects_->run_after_attack(*this, &a);
@@ -833,7 +820,7 @@ void Engine::resolve_attack(Attack& a) {
     return;
   }
   apply_damage_to(target, effA, effL, a.keywords, a.sourceInst,
-                  a.attackerChoosesDamage ? a.attacker : -1, true);
+                  a.attackerChoosesDamage ? a.attacker : -1, true, route);
   lastAtkSide_ = lastDmgSide_;
   lastAtkAmount_ = lastDmgAmount_;
   a.hit = true;
@@ -842,424 +829,18 @@ void Engine::resolve_attack(Attack& a) {
   effects_->clear_attack_callbacks(&a);
 }
 
-// ---------------------------------------------------------------------------
-// playing cards
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// 22-Renri 夜山恋离: 伪证
-// ---------------------------------------------------------------------------
-
-// 在自己回合内使用常规牌时，可以背面向上打出并声称它是某张伪证牌。对手
-// 可以选择质疑。返回：0 = 正常打出；1 = 按声称的牌结算；2 = 质疑成功，
-// 这张牌与声称牌的效果都不执行。
-int Engine::declare_bluff(Player p, int inst) {
-  std::vector<int> claims = bluff_claim_defs(p);
-  if (claims.empty()) return 0;
-  Request r;
-  r.kind = "bluff";
-  r.prompt = "伪证：背面向上打出并声称？";
-  r.options.push_back({"正常打出", true, {{"bluff", false}}});
-  for (int defId : claims) {
-    const CardDef& cd = def(defId);
-    Option o;
-    o.label = "伪证：" + cd.name;
-    o.data = {{"bluff", true}, {"def", defId}, {"name", cd.name}};
-    r.options.push_back(o);
-  }
-  const int idx = ask_one(p, std::move(r));
-  if (idx <= 0 || idx > static_cast<int>(claims.size())) return 0;
-  const int claimDef = claims[static_cast<size_t>(idx - 1)];
-
-  bluffActive_ = true;
-  bluffInst_ = inst;
-  bluffClaimDef_ = claimDef;
-  bluffNotDoubted_ = false;
-  bluffDoubtFailed_ = false;
-
-  Request q;
-  q.kind = "doubt";
-  q.prompt = "对手声称这是「" + def(claimDef).name + "」。质疑？";
-  q.options.push_back({"不质疑", true, {{"doubt", 0}}});
-  q.options.push_back({"质疑", true, {{"doubt", 1}}});
-  const int doubted = ask_one(opp(p), std::move(q)) == 1;
-  if (doubted) {
-    if (def_of(inst).name == def(claimDef).name) {
-      // 质疑失败: 对手焦躁一次，然后正常使用这张牌。
-      ps(opp(p)).doubtFailedThisTurn = true;
-      bluffDoubtFailed_ = true;
-      impatience(opp(p));
-    } else {
-      // 质疑成功: 两者效果都不执行。
-      bluffActive_ = false;
-      bluffInst_ = -1;
-      bluffClaimDef_ = -1;
-      return 2;
-    }
-  } else {
-    bluffNotDoubted_ = true;
-  }
-  pendingResolveAs_ = claimDef;
-  return 1;
-}
-
-void Engine::play_card(Player p, int inst, bool asResponse, bool zenkai) {
-  if (st.over) return;
-  const CardDef& d = def_of(inst);
-  const int defId = d.id;
-  // 22-Renri: 伪证上下文在嵌套结算（牌效再打出别的牌）时不能被覆盖。
-  const bool savedBluffActive = bluffActive_;
-  const int savedBluffInst = bluffInst_;
-  const int savedBluffClaim = bluffClaimDef_;
-  const bool savedNotDoubted = bluffNotDoubted_;
-  const bool savedDoubtFailed = bluffDoubtFailed_;
-  const int savedPending = pendingResolveAs_;
-  int bluffResult = 0;  // 0 无 / 1 按声称结算 / 2 质疑成功
-  // 18-Mizuki: 已动员的士兵从兵舍打出；结算完毕后翻回未动员并留在兵舍。
-  const bool fromBarracks = vec_has(ps(p).barracks, inst);
-  if (fromBarracks) leave_barracks(p, inst);
-  callStack_.push_back({defId, p});
-  StackGuard stackGuard{callStack_};
-  ps(p).cardsPlayedThisTurn += 1;
-  // 18-Mizuki: “本回合打出的第一张对应”序号（嵌套结算用栈）。
-  if (asResponse) {
-    ps(p).responsesPlayedThisTurn += 1;
-    responseOrdStack_.push_back(ps(p).responsesPlayedThisTurn);
-    check_dramas();  // 20-Kanawe《杀阵》
-  } else {
-    responseOrdStack_.push_back(0);
-  }
-
-  // 尸: 本回合对手的下一次攻击必须额外弃置一张该女神的牌作为费用。
-  if (d.type == CardType::Attack && !ps(p).extraAttackCostGoddess.empty()) {
-    const std::string g = ps(p).extraAttackCostGoddess;
-    std::vector<int> cands;
-    for (int h : ps(p).hand)
-      if (h != inst && def_of(h).goddess == g) cands.push_back(h);
-    for (int h : ps(p).special)
-      if (!ci(h).faceUp && def_of(h).goddess == g) cands.push_back(h);
-    if (!cands.empty()) {
-      Request r;
-      r.kind = "cards";
-      r.prompt = "尸：额外弃置一张" + g + "的牌作为费用";
-      r.minSel = 1;
-      r.maxSel = 1;
-      for (int h : cands) {
-        Option o;
-        o.label = card_label(def_of(h));
-        o.data = card_json(def_of(h));
-        o.data["inst"] = h;
-        r.options.push_back(o);
-      }
-      int pick = ask_one(p, std::move(r));
-      if (pick >= 0 && pick < static_cast<int>(cands.size())) {
-        int h = cands[static_cast<size_t>(pick)];
-        if (ci(h).zone == Zone::Hand)
-          move_card(h, Zone::Discard);
-        else {
-          move_card(h, Zone::Discard);  // 切札: 直接进弃牌堆
-        }
-      }
-    }
-    ps(p).extraAttackCostGoddess.clear();
-  }
-
-  if (d.kind == CardKind::Special) {
-    pay_special_cost(p, inst);  // 含 24-Shisui 的 {X} 裂伤费用
-    ci(inst).faceUp = true;  // used / 展开
-    ci(inst).usedThisTurn = true;
-  } else {
-    // Remove it from whichever zone list currently holds it (normal EX cards can
-    // sit outside the hand), then park it in Limbo while it resolves.
-    if (!fromBarracks) {
-      if (auto* v = zone_ptr(st, ci(inst).holder, ci(inst).zone))
-        v->erase(std::remove(v->begin(), v->end(), inst), v->end());
-    }
-    ci(inst).zone = Zone::Limbo;
-  }
-
-  // 18-Mizuki O-S2 即再起: 你打出具有终端的牌（该牌结算之前再起）。
-  if (has_terminal(inst)) fire("terminal_card_used", p, nullptr, inst, false);
-
-  // 22-Renri 伪证: 只在自己回合、只对常规牌、对应打出时不能伪证。
-  if (!asResponse && st.active == p && d.kind == CardKind::Normal && !bluffActive_)
-    bluffResult = declare_bluff(p, inst);
-
-  const bool bluffed = bluffResult != 0;
-  if (bluffResult != 2) {
-    resolve_card_effect(p, inst, asResponse, zenkai);
-  } else {
-    ps(p).cardsPlayedTotal += 1;  // 这张牌被使用过（但没有任何效果）
-  }
-  if (!responseOrdStack_.empty()) responseOrdStack_.pop_back();
-
-  if (st.over) {
-    bluffActive_ = savedBluffActive;
-    bluffInst_ = savedBluffInst;
-    bluffClaimDef_ = savedBluffClaim;
-    bluffNotDoubted_ = savedNotDoubted;
-    bluffDoubtFailed_ = savedDoubtFailed;
-    pendingResolveAs_ = savedPending;
-    return;
-  }
-
-  if (bluffed) {
-    // 道化的觉悟: 伪证没有被质疑 → 公开并获得 1 集中力。
-    if (bluffNotDoubted_) fire("bluff_undoubted", p, nullptr, inst, false);
-    // 回归: 对手质疑失败时，可以把这张牌移出游戏并把「考古」置回弃牌堆。
-    if (bluffDoubtFailed_ && def_of(inst).regression && ci(inst).zone != Zone::Removed) {
-      if (ask_yes_no(p, "回归：将这张牌移出游戏，并把「考古」置回弃牌堆？")) {
-        remove_from_game(inst);
-        for (int i = 0; i < static_cast<int>(st.insts.size()); ++i) {
-          if (ci(i).owner == p && ci(i).zone == Zone::Removed && def_of(i).kaoguReturn) {
-            move_card(i, Zone::Discard);
-            break;
-          }
-        }
-      }
-    }
-  }
-  bluffActive_ = savedBluffActive;
-  bluffInst_ = savedBluffInst;
-  bluffClaimDef_ = savedBluffClaim;
-  bluffNotDoubted_ = savedNotDoubted;
-  bluffDoubtFailed_ = savedDoubtFailed;
-  pendingResolveAs_ = savedPending;
-
-  if (fromBarracks && (ci(inst).zone == Zone::Limbo || ci(inst).zone == Zone::Discard)) {
-    // 攻击/行动士兵结算完毕 → 翻回未动员回兵舍；enhance 士兵（骑兵）在离场时才回。
-    to_barracks(p, inst, false);
-  } else if (d.kind == CardKind::Normal && ci(inst).zone == Zone::Limbo) {
-    if (d.isPoison) {
-      if (d.name == cards::kMetsutouDoku)
-        force_move(inst, Zone::Discard);
-      else
-        return_poison(inst);  // poisons return to their owner's bag
-    } else {
-      move_card(inst, Zone::Discard);
-    }
-  }
-}
-
-void Engine::resolve_card_effect(Player p, int inst, bool asResponse, bool zenkai) {
-  // 22-Renri: 伪证按声称的牌结算 / 铭镌之衣按复制结算 / 洛阳铲按声称结算。
-  // on_declare 在类型分派之前运行，可以请求「改用另一张牌结算」。
-  const int realDefId = ci(inst).def;
-  if (resolveOverrideInst_ != inst) {
-    if (pendingResolveAs_ < 0 && effects_->has(realDefId, "on_declare"))
-      effects_->call(*this, realDefId, "on_declare", p, inst);
-    const int overrideDef = pendingResolveAs_;
-    pendingResolveAs_ = -1;
-    if (overrideDef >= 0 && overrideDef != realDefId) {
-      const int prevOverride = resolveOverrideInst_;
-      resolveOverrideInst_ = inst;
-      ci(inst).def = overrideDef;
-      resolve_card_effect(p, inst, asResponse, zenkai);
-      ci(inst).def = realDefId;
-      resolveOverrideInst_ = prevOverride;
-      return;
-    }
-  }
-  const CardDef& d = def_of(inst);
-  const int defId = d.id;
-  // 26-Innealra 诺伦: 「本回合内你使用过非诺伦的牌」/「本回合内使用过通常牌」。
-  note_card_used_by(p, d);
-  keisouDoubled_ = false;  // 骇客装置: one doubling per 机巧 resolution
-  // 子午灯塔: 对手的回合内，对手从手牌使用了非攻击牌 → 改为弃置本牌（不结算效果，
-  // 视作对手使用了这张牌），然后将其变为未使用状态。
-  // 顺序在潜水判定之前：结算效果被替换/取消时不进入解除潜水流程（卡面裁定）。
-  if (st.active == p && d.type != CardType::Attack) {
-    int lh = -1;
-    for (int s : ps(opp(p)).special)
-      if (ci(s).faceUp && def_of(s).interceptNonAttack) {
-        lh = s;
-        break;
-      }
-    if (lh >= 0) {
-      ps(p).cardsPlayedTotal += 1;  // 视作对手使用了这张牌
-      reset_special(lh);
-      return;
-    }
-  }
-  // 潜水: 对手使用非攻击牌时，在该牌结算之前先公开潜水、执行效果并解除潜水状态。
-  // 攻击牌要等"使用"被确认（迟缓毒等会拒绝使用）之后，见下方攻击分支。
-  if (d.type != CardType::Attack && ps(opp(p)).dive != 0) reveal_dive(opp(p), false);
-  // Raira 风雷: using a non-Raira card raises one slot by 1.
-  if (ps(p).raira && d.goddess != "raira" && !ps(p).rairaGainRestricted) {
-    Request r;
-    r.kind = "option";
-    r.prompt = "风雷：选择一个槽 +1";
-    r.options.push_back({"风神 +1", true, {}});
-    r.options.push_back({"雷神 +1", true, {}});
-    int c = ask_one(p, std::move(r));
-    if (c == 1) {
-      if (ps(p).thunder < 20) ps(p).thunder += 1;
-    } else {
-      if (ps(p).wind < 20) ps(p).wind += 1;
-    }
-  }
-  ps(p).cardsPlayedTotal += 1;  // 万叶仍未识: 本局打出的牌数
-  if (d.centrifugal) playedCentrifugalThisTurn_[p] = true;
-  if (d.name == cards::kRenseiKougeki) playedLianchengThisTurn_[p] = true;
-  bool prevZenkai = zenkaiActive_;
-  zenkaiActive_ = zenkai;
-  // Yukihi A1-S2: first non-Yukihi normal card each turn.
-  if (d.kind == CardKind::Normal && !card_has_goddess(inst, "yukihi")) {
-    normalNonYukihi_[p] += 1;
-    fire("normal_card_used", p, nullptr, inst, normalNonYukihi_[p] == 1);
-  }
-  if (d.type == CardType::Enhance) {
-    // 19-Megumi 耕种：打出任何付与牌时，先把 1 个绿色结晶从「种子」移到「植株」，
-    // 再结算该付与牌（含其「展开时」）。
-    cultivate(p);
-    // Re-expanding a card that still holds 献 (e.g. reuse): return the old ones first.
-    if (card_crystal_count(inst) > 0) {
-      int sak = 0;
-      int old = card_crystal_count(inst);
-      take_card_crystals(inst, old, kTakeNormal, &sak);
-      if (sak > 0) decay_crystals(inst, sak);
-    }
-    // Order per the rules: 展开时 first, then place 献, then discard if empty.
-    if (effects_->has(defId, "on_enter")) effects_->call(*this, defId, "on_enter", p, inst);
-    // pay_nagi 直接把献放到牌上（on_enter 先加的结晶保留，如 反射装置）。
-    pay_nagi(p, inst);
-    if (d.kind == CardKind::Normal)
-      move_card(inst, Zone::Enhance);
-    else
-      move_card(inst, Zone::Special);
-    // 献 placed: cards that react to the final 献 count (寄花: 展开时移 X 个到虚).
-    if (effects_->has(defId, "on_expanded"))
-      effects_->call(*this, defId, "on_expanded", p, inst);
-    // 19-Megumi 生长X：询问玩家是否将至多 X 个「植株」移到该牌上（可以不移动）。
-    grow_enhance(p, inst);
-    if (card_crystal_count(inst) <= 0) {
-      ci(inst).crystals = 0;
-      ci(inst).green = 0;
-      if (d.kind == CardKind::Normal) {
-        move_card(inst, Zone::Discard);
-        if (effects_->has(defId, "on_discard")) effects_->call(*this, defId, "on_discard", p, inst);
-        fire("enhance_left", p, nullptr, inst, false);
-      } else {
-        if (effects_->has(defId, "on_discard")) effects_->call(*this, defId, "on_discard", p, inst);
-        // 26-Innealra 万劫缠迫: 弃置时把自己移出游戏 —— 不能又被送回切牌区。
-        if (ci(inst).zone == Zone::Removed) return;
-        move_card(inst, Zone::Special);
-      }
-    }
-  } else if (d.type == CardType::Attack) {
-    // 迟缓毒: "你不能使用攻击牌" — playing an attack card is refused (generated
-    // attacks via ctx:attack are not "using" a card and stay allowed).
-    if (attack_card_forbidden(p)) return;
-    ps(p).attackCardsPlayedThisTurn += 1;  // 18-Mizuki O-S2
-    // 潜水: 攻击牌的使用被确认后、结算之前公开潜水。
-    const bool diveByAttack =
-        ps(opp(p)).dive != 0 && reveal_dive(opp(p), true);
-    // on_play (if any) runs before the attack and may modify the responded attack.
-    if (effects_->has(defId, "on_play")) effects_->call(*this, defId, "on_play", p, inst);
-    // 潜水闪避: 由攻击牌触发的公开要立即检查距离（无视“锁定”词条）。落空则该攻击
-    // 视为未发生过：不声明、不计数、不进入对应与结算步骤；牌照常进弃牌堆/使用后态。
-    Attack a = make_attack(p, inst, asResponse, true, /*declareNow=*/false);
-    const bool evaded =
-        diveByAttack && !(a.keywords & AF_Lock) && !attack_range_ok(a);
-    if (evaded) {
-      ps(opp(p)).forcedTailwind = true;  // 潜水闪避成功: 你的下回合固定顺风
-    } else {
-      declare_attack(a);
-      resolve_attack(a);
-      if (a.hit && effects_->has(defId, "on_attack_after"))
-        effects_->call(*this, defId, "on_attack_after", p, inst);
-      if (a.terminal) {  // 电磁炮 黄: dynamic 终端
-        if (st.active != p)
-          ps(p).cannotRespond = true;
-        else
-          abortMain_ = true;
-      }
-    }
-    // 23-Akina O-S1 差列递归征税法: 资本 > 对手时必须再使用一次（照常支付费用）。
-    if (!st.over) maybe_force_reuse(p, inst);
-  } else {  // Action
-    if (effects_->has(defId, "on_play")) effects_->call(*this, defId, "on_play", p, inst);
-    fire("action_resolved", p, nullptr, inst, false);  // 模块化
-  }
-  if (has_full_power(inst)) {
-    usedFullPowerThisTurn_[p] = true;
-    fire("fullpower_used", p, nullptr, inst, false);
-    check_dramas();  // 20-Kanawe《战栗》
-    // 26-Innealra 诺伦: 对手使用全力牌时，你可以轮转一次命运槽（不共鸣）。
-    if (!st.over && has_innealra(opp(p))) offer_fate_rotation(opp(p), "对手使用了全力牌");
-  }
-  if (has_terminal(inst) && st.active != p) ps(p).cannotRespond = true;
-  zenkaiActive_ = prevZenkai;
-}
-
 void Engine::cover_card(int inst) {
   move_card(inst, Zone::Cover);
   ci(inst).faceUp = false;
-}
-
-void Engine::use_from_cover(int inst, bool asResponse) {
-  play_from_cover(ci(inst).owner, inst, asResponse, false);
-}
-
-void Engine::play_from_cover(Player p, int inst, bool asResponse, bool toDeckAfter) {
-  if (st.over) return;
-  const CardDef& d = def_of(inst);
-  // Only a card actually taken from the cover pile counts as "from the cover
-  // pile"; 经纱/诸式理解 use play_from_cover for discard-pile cards too.
-  const bool fromCover = (ci(inst).zone == Zone::Cover);
-  move_card(inst, Zone::Limbo);
-  callStack_.push_back({d.id, p, fromCover});
-  StackGuard stackGuard{callStack_};
-  ps(p).cardsPlayedThisTurn += 1;
-  if (asResponse) {
-    ps(p).responsesPlayedThisTurn += 1;
-    responseOrdStack_.push_back(ps(p).responsesPlayedThisTurn);
-    ps(p).respondedThisTurn = true;
-  } else {
-    responseOrdStack_.push_back(0);
-  }
-  resolve_card_effect(p, inst, asResponse);
-  if (!responseOrdStack_.empty()) responseOrdStack_.pop_back();
-  if (ci(inst).zone == Zone::Limbo) {
-    if (toDeckAfter)
-      move_card(inst, Zone::Deck);
-    else
-      move_card(inst, Zone::Discard);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// turn structure
-// ---------------------------------------------------------------------------
-
-void Engine::use_card(int inst, bool asResponse) {
-  play_from_cover(ci(inst).owner, inst, asResponse, false);
-}
-
-void Engine::use_foreign_card(Player user, int inst) {
-  if (st.over) return;
-  const int defId = ci(inst).def;
-  // A borrowed 付与 expands on the *user's* side (ruling): transfer ownership
-  // first so it joins the user's enhance zone and its aura benefits the user.
-  if (def_of(inst).type == CardType::Enhance && ci(inst).holder != user) {
-    move_card(inst, Zone::Limbo);
-    ci(inst).holder = user;  // on the user's field; owner unchanged (returns home)
-  }
-  move_card(inst, Zone::Limbo);
-  callStack_.push_back({defId, user, false});
-  StackGuard stackGuard{callStack_};
-  resolve_card_effect(user, inst, false);
-  if (ci(inst).zone == Zone::Limbo) {
-    // 切牌永远不会进入弃牌堆: a borrowed 切札 returns to a special zone (used),
-    // everything else goes to its owner's discard pile.
-    move_card(inst, def_of(inst).kind == CardKind::Special ? Zone::Special : Zone::Discard);
-  }
 }
 
 void Engine::reuse_special(int inst) {
   // 25-Misora 观空穹仪: 不能被其它牌的效果再次发动。
   if (inst < 0 || def_of(inst).noReuse) return;
   store_int(inst, "paid_cost", 0);  // 26-Innealra: 再次发动没有支付费用
+  // 再次发动同样是一次「打出结算」：压栈结算语境（伪证/全开等不跨牌泄漏）。
+  push_play_frame(def_of(inst).id, ci(inst).owner, false);
+  PlayFrameGuard frameGuard{*this};
   resolve_card_effect(ci(inst).owner, inst, false);
 }
 

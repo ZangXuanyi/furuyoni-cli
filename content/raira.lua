@@ -214,7 +214,7 @@ return {
 
   { set = "raira.A1", form = "A1", num = 6, name = "大岚", kind = "normal", type = "enhance",
     nagi = 0, full_power = true,
-    on_enter = function(ctx)
+    on_expand = function(ctx)
       for _ = 1, 3 do
         local c = ctx:choose("大岚：选择3次", { "风+1", "雷+1", "1虚到本牌" })
         if c == 1 then

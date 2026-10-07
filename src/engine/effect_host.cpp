@@ -262,7 +262,7 @@ struct EffectHost::Impl {
     std::fprintf(stderr, "[lua error] %s\n", msg.c_str());
   }
   struct Hook {
-    sol::object on_play, on_enter, on_discard, on_attack_after, on_use_after;
+    sol::object on_play, on_expand, on_discard, on_attack_after, on_use_after;
     sol::table spec;
     sol::object keiryo;  // Shinra 计略 effect (神算/鬼谋 branch)
     std::vector<sol::table> continuous;
@@ -1598,7 +1598,7 @@ void EffectHost::load_file(const std::string& path, std::vector<CardDef>& defs) 
     Impl::Hook h;
     h.spec = t;
     h.on_play = t["on_play"];
-    h.on_enter = t["on_enter"];
+    h.on_expand = t["on_expand"];
     h.on_discard = t["on_discard"];
     h.on_attack_after = t["on_attack_after"];
     h.on_use_after = t["on_use_after"];
@@ -1632,7 +1632,7 @@ void EffectHost::load_file(const std::string& path, std::vector<CardDef>& defs) 
 }
 
 bool EffectHost::has(int defId, const char* hook) const {
-  // Any Lua hook the content defines (on_play / on_enter / on_discard /
+  // Any Lua hook the content defines (on_play / on_expand / on_discard /
   // on_attack_after / on_use_after / on_transform / extra_basic / ...).
   return has_hook(defId, hook);
 }
@@ -1648,7 +1648,7 @@ void EffectHost::call(Engine& e, int defId, const char* hook, Player who, int in
   const sol::object* obj = nullptr;
   std::string hh(hook);
   if (hh == "on_play") obj = &h.on_play;
-  else if (hh == "on_enter") obj = &h.on_enter;
+  else if (hh == "on_expand") obj = &h.on_expand;
   else if (hh == "on_discard") obj = &h.on_discard;
   else if (hh == "on_attack_after") obj = &h.on_attack_after;
   else if (hh == "on_use_after") obj = &h.on_use_after;
