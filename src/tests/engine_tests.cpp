@@ -6007,3 +6007,317 @@ TEST_CASE("reveal_cards: 检视+选择形态与 choose_cards 等价；cuts 只�
   CHECK(crystals_total(e) == 36);
   for (const std::string& v : check_invariants(e)) CHECK_MESSAGE(false, v);
 }
+
+// ---------------------------------------------------------------------------
+// 死亡/特胜/特败 优先级矩阵（裁定 2026-10-07：特胜特败 → 赖着不死 → 复活；
+// 诅咒特败与戏剧特胜无视复活，但允许赖着不死）。
+// ---------------------------------------------------------------------------
+
+namespace {
+// 把一张切札付与以「已使用、展开中」状态放到 p 的切牌区，带 n 个献。
+int expand_special_cut(Engine& e, const char* goddess, const char* name, Player p, int n) {
+  int def = find_def(e, goddess, name);
+  REQUIRE(def >= 0);
+  int inst = e.add_instance(def, p);
+  e.move_card(inst, Zone::Special);
+  e.ci(inst).faceUp = true;
+  e.move(AreaRef::distance(), AreaRef::card(inst), n, false);  // 献取自距（守恒）
+  return inst;
+}
+// 选标签含 sub 的第一个选项的 agent。
+struct FindOptionAgent : Agent {
+  std::string sub;
+  explicit FindOptionAgent(std::string s) : sub(std::move(s)) {}
+  Decision decide(const Request& req) override {
+    for (size_t i = 0; i < req.options.size(); ++i)
+      if (req.options[i].label.find(sub) != std::string::npos)
+        return Decision{{static_cast<int>(i)}};
+    return Decision{};
+  }
+};
+}  // namespace
+
+TEST_CASE("死亡矩阵: 特胜特败——炎天/森罗判证/信条/残烛式/诅咒/戏剧终点") {
+  // 炎天·红绯弥香：攻击后若对手存活则自死亡。
+  {
+    Config cfg = make_cfg("standard", 1);
+    Engine e(cfg);
+    e.load_content(find_file("content/himika.lua"));
+    FirstAgent a;
+    e.set_agent(P0, &a);
+    e.set_agent(P1, &a);
+    int def = find_def(e, "himika.A1", "炎天·红绯弥香");
+    REQUIRE(def >= 0);
+    int inst = e.add_instance(def, P0);
+    e.move_card(inst, Zone::Hand);
+    e.st.active = P0;
+    e.move(AreaRef::distance(), AreaRef::dust(), 5, false);  // 距 5 ∈ [0,7]
+    e.play_card(P0, inst, false, /*zenkai=*/true);
+    CHECK(e.st.over);
+    CHECK(e.st.winner == P1);  // 对手存活（命 10）→ 攻击方特败
+  }
+  // 森罗判证：弃置时自死亡。
+  {
+    Config cfg = make_cfg("standard", 1);
+    Engine e(cfg);
+    e.load_content(find_file("content/shinra.lua"));
+    FirstAgent a;
+    e.set_agent(P0, &a);
+    e.set_agent(P1, &a);
+    int inst = expand_special_cut(e, "shinra", "森罗判证", P0, 1);
+    e.consume_enhance_crystal(inst);  // 献尽 → 弃置时：你死亡
+    CHECK(e.st.over);
+    CHECK(e.st.winner == P1);
+  }
+  // 信条：弃置时若其他切牌全部使用完 → 对手死亡；否则不杀。
+  {
+    Config cfg = make_cfg("standard", 1);
+    Engine e(cfg);
+    e.load_content(find_file("content/chikage.lua"));
+    FirstAgent a;
+    e.set_agent(P0, &a);
+    e.set_agent(P1, &a);
+    int other = e.add_instance(find_def(e, "chikage", "缠毒揭叛旗"), P0);
+    e.move_card(other, Zone::Special);
+    e.ci(other).faceUp = false;  // 未使用
+    int inst = expand_special_cut(e, "chikage", "暗昏千影的信条", P0, 1);
+    e.consume_enhance_crystal(inst);
+    CHECK_FALSE(e.st.over);  // 其他切牌未使用 → 条件不满足
+    e.ci(other).faceUp = true;
+    e.st.over = false;  // 手动重置以验证下一次判定（仅测试用）
+    int inst2 = expand_special_cut(e, "chikage", "暗昏千影的信条", P0, 1);
+    e.consume_enhance_crystal(inst2);
+    CHECK(e.st.over);
+    CHECK(e.st.winner == P0);  // 全部使用完 → 对手特败
+  }
+  // 残烛式：弃置时对手死亡。
+  {
+    Config cfg = make_cfg("standard", 1);
+    Engine e(cfg);
+    e.load_content(find_file("content/konuru.lua"));
+    FirstAgent a;
+    e.set_agent(P0, &a);
+    e.set_agent(P1, &a);
+    int inst = expand_special_cut(e, "konuru.A1", "残烛式", P0, 1);
+    e.consume_enhance_crystal(inst);
+    CHECK(e.st.over);
+    CHECK(e.st.winner == P0);
+  }
+  // 诅咒 ≥ 16：特败（无赖着不死时立即）。
+  {
+    Config cfg = make_cfg("standard", 1);
+    Engine e(cfg);
+    e.load_content(find_file("content/kamuwi.lua"));
+    FirstAgent a;
+    e.set_agent(P0, &a);
+    e.set_agent(P1, &a);
+    e.add_curse(P0, 16);
+    CHECK(e.st.over);
+    CHECK(e.st.winner == P1);
+  }
+}
+
+TEST_CASE("死亡矩阵: 复活——最后的结晶与仙霄鬼泉") {
+  // 最后的结晶：首次死亡付费复活。
+  {
+    Config cfg = make_cfg("standard", 1);
+    Engine e(cfg);
+    e.load_content(find_file("content/oboro.lua"));
+    FirstAgent a;  // 复活询问选第一项「使用」
+    e.set_agent(P0, &a);
+    e.set_agent(P1, &a);
+    int cut = e.add_instance(find_def(e, "oboro.A1", "最后的结晶"), P0);
+    e.move_card(cut, Zone::Special);
+    e.ci(cut).faceUp = false;
+    e.move(AreaRef::distance(), AreaRef::flare(P0), 3, false);  // 复活费用（守恒）
+    e.die(P0);
+    CHECK_FALSE(e.st.over);       // 复活生效
+    CHECK(e.ps(P0).life == 1);
+    CHECK(e.ps(P0).usedLastCrystal);
+    CHECK(crystals_total(e) == 36);
+  }
+  // 仙霄鬼泉天元术：死亡时 4 自气到自命并自移除，游戏继续。
+  {
+    Config cfg = make_cfg("standard", 1);
+    Engine e(cfg);
+    e.load_content(find_file("content/akina.lua"));
+    FirstAgent a;
+    e.set_agent(P0, &a);
+    e.set_agent(P1, &a);
+    expand_special_cut(e, "akina", "仙霄鬼泉天元术", P0, 1);
+    e.move(AreaRef::distance(), AreaRef::flare(P0), 4, false);
+    e.die(P0);
+    CHECK_FALSE(e.st.over);
+    CHECK(e.ps(P0).life == 4);  // 4 气回到命
+    CHECK(crystals_total(e) == 36);
+    for (const std::string& v : check_invariants(e)) CHECK_MESSAGE(false, v);
+  }
+}
+
+TEST_CASE("死亡矩阵: 赖着不死——阡与埋骨地") {
+  // 阡：展开中对手不死亡；弃置后死亡。
+  {
+    Config cfg = make_cfg("standard", 1);
+    Engine e(cfg);
+    e.load_content(find_file("content/kamuwi.lua"));
+    FirstAgent a;
+    e.set_agent(P0, &a);
+    e.set_agent(P1, &a);
+    int qian = expand_special_cut(e, "kamuwi", "阡", P1, 4);
+    e.move(AreaRef::life(P0), AreaRef::dust(), e.ps(P0).life, false);
+    e.check_win();
+    CHECK_FALSE(e.st.over);  // 阡护住
+    for (int k = 0; k < 4; ++k) e.consume_enhance_crystal(qian);  // 阡弃置
+    e.check_win();
+    CHECK(e.st.over);
+    CHECK(e.st.winner == P1);
+  }
+  // 埋骨地：展开中持有者不死亡（命 0）；弃置后死亡。
+  {
+    Config cfg = make_cfg("standard", 1);
+    Engine e(cfg);
+    e.load_content(find_file("content/shisui.lua"));
+    FirstAgent a;
+    e.set_agent(P0, &a);
+    e.set_agent(P1, &a);
+    int grave = expand_special_cut(e, "shisui", "桑畑志水的埋骨地", P0, 2);
+    e.move(AreaRef::life(P0), AreaRef::dust(), e.ps(P0).life, false);
+    e.check_win();
+    CHECK_FALSE(e.st.over);
+    e.consume_enhance_crystal(grave);
+    e.consume_enhance_crystal(grave);
+    e.check_win();
+    CHECK(e.st.over);
+    CHECK(e.st.winner == P1);
+  }
+}
+
+TEST_CASE("死亡矩阵: 组合——赖着不死优先于复活（裁定示例）") {
+  // 对手开阡 + 我有仙霄：0 命不输，且仙霄不触发；阡弃置后仙霄触发、游戏继续。
+  Config cfg = make_cfg("standard", 1);
+  Engine e(cfg);
+  e.load_content(find_file("content/kamuwi.lua"));
+  e.load_content(find_file("content/akina.lua"));
+  FirstAgent a;
+  e.set_agent(P0, &a);
+  e.set_agent(P1, &a);
+  int qian = expand_special_cut(e, "kamuwi", "阡", P1, 4);
+  int xianxiao = expand_special_cut(e, "akina", "仙霄鬼泉天元术", P0, 1);
+  e.move(AreaRef::distance(), AreaRef::flare(P0), 4, false);
+  e.move(AreaRef::life(P0), AreaRef::dust(), e.ps(P0).life, false);
+  e.check_win();
+  CHECK_FALSE(e.st.over);
+  CHECK(e.card_crystal_count(xianxiao) == 1);  // 仙霄未被触发/未自移除
+  for (int k = 0; k < 4; ++k) e.consume_enhance_crystal(qian);  // 阡弃置
+  e.check_win();
+  CHECK_FALSE(e.st.over);          // 仙霄救回
+  CHECK(e.ps(P0).life == 4);
+  CHECK(crystals_total(e) == 36);
+  for (const std::string& v : check_invariants(e)) CHECK_MESSAGE(false, v);
+}
+
+TEST_CASE("死亡矩阵: 诅咒特败无视复活，但允许赖着不死") {
+  // 埋骨地 + 16 诅咒：继续；埋骨地弃置即刻败，最后的结晶不被询问。
+  {
+    Config cfg = make_cfg("standard", 1);
+    Engine e(cfg);
+    e.load_content(find_file("content/shisui.lua"));
+    e.load_content(find_file("content/oboro.lua"));
+    FirstAgent a;
+    e.set_agent(P0, &a);
+    e.set_agent(P1, &a);
+    int grave = expand_special_cut(e, "shisui", "桑畑志水的埋骨地", P0, 2);
+    int cut = e.add_instance(find_def(e, "oboro.A1", "最后的结晶"), P0);
+    e.move_card(cut, Zone::Special);
+    e.ci(cut).faceUp = false;
+    e.move(AreaRef::distance(), AreaRef::flare(P0), 3, false);  // 费用充足——但不得复活
+    e.add_curse(P0, 16);
+    CHECK_FALSE(e.st.over);  // 赖着不死生效
+    e.consume_enhance_crystal(grave);
+    e.consume_enhance_crystal(grave);
+    e.check_win();
+    CHECK(e.st.over);  // 埋骨地离场即刻特败
+    CHECK(e.st.winner == P1);
+    CHECK_FALSE(e.ps(P0).usedLastCrystal);  // 复活从未被消耗
+  }
+  // 诅咒特败（无埋骨地）：最后的结晶直接跳过。
+  {
+    Config cfg = make_cfg("standard", 1);
+    Engine e(cfg);
+    e.load_content(find_file("content/kamuwi.lua"));
+    e.load_content(find_file("content/oboro.lua"));
+    FirstAgent a;
+    e.set_agent(P0, &a);
+    e.set_agent(P1, &a);
+    int cut = e.add_instance(find_def(e, "oboro.A1", "最后的结晶"), P0);
+    e.move_card(cut, Zone::Special);
+    e.ci(cut).faceUp = false;
+    e.move(AreaRef::distance(), AreaRef::flare(P0), 3, false);
+    e.add_curse(P0, 16);
+    CHECK(e.st.over);
+    CHECK(e.st.winner == P1);
+    CHECK_FALSE(e.ps(P0).usedLastCrystal);
+  }
+}
+
+TEST_CASE("死亡矩阵: 戏剧特胜无视复活，但允许赖着不死") {
+  // 直接验证标记语义：被戏剧标记后，死亡不可被最后的结晶救回。
+  {
+    Config cfg = make_cfg("standard", 1);
+    Engine e(cfg);
+    e.load_content(find_file("content/oboro.lua"));
+    FirstAgent a;
+    e.set_agent(P0, &a);
+    e.set_agent(P1, &a);
+    int cut = e.add_instance(find_def(e, "oboro.A1", "最后的结晶"), P0);
+    e.move_card(cut, Zone::Special);
+    e.ci(cut).faceUp = false;
+    e.move(AreaRef::distance(), AreaRef::flare(P0), 3, false);
+    e.mark_irrevocable(P0);  // 戏剧特胜标记
+    CHECK(e.irrevocable(P0));
+    e.die(P0);
+    CHECK(e.st.over);  // 复活被跳过
+    CHECK(e.st.winner == P1);
+    CHECK_FALSE(e.ps(P0).usedLastCrystal);
+  }
+  // 接线验证：走到地图终点确实标记并击杀对手（对手无保护时）。
+  {
+    Config cfg = make_cfg("standard", 1);
+    Engine e(cfg);
+    e.load_content(find_file("content/kanawe.lua"));
+    FirstAgent a;
+    e.set_agent(P0, &a);
+    e.set_agent(P1, &a);
+    e.ps(P0).node = "5A";  // 可试炼到终点的节点
+    e.advance_node(P0, /*upgraded=*/true);
+    CHECK(e.st.over);
+    CHECK(e.st.winner == P0);  // 终点：对手死亡（戏剧特胜）
+    CHECK(e.irrevocable(P1));
+  }
+  // 戏剧特胜 + 对手的阡：先护住；阡弃置后死亡且无视复活。
+  {
+    Config cfg = make_cfg("standard", 1);
+    Engine e(cfg);
+    e.load_content(find_file("content/kanawe.lua"));
+    e.load_content(find_file("content/kamuwi.lua"));
+    e.load_content(find_file("content/oboro.lua"));
+    FirstAgent a;
+    e.set_agent(P0, &a);
+    e.set_agent(P1, &a);
+    int qian = expand_special_cut(e, "kamuwi", "阡", P0, 4);  // 阡在走图者手上：护其对手 P1
+    int cut = e.add_instance(find_def(e, "oboro.A1", "最后的结晶"), P1);
+    e.move_card(cut, Zone::Special);
+    e.ci(cut).faceUp = false;
+    e.move(AreaRef::distance(), AreaRef::flare(P1), 3, false);
+    e.ps(P0).node = "5A";
+    e.advance_node(P0, true);
+    CHECK_FALSE(e.st.over);      // 阡护住
+    CHECK(e.ps(P1).life == 0);   // 命已被清空（等待判定）
+    CHECK(e.irrevocable(P1));
+    for (int k = 0; k < 4; ++k) e.consume_enhance_crystal(qian);
+    e.check_win();
+    CHECK(e.st.over);  // 阡弃置 → 特胜落地，复活被跳过
+    CHECK(e.st.winner == P0);
+    CHECK_FALSE(e.ps(P1).usedLastCrystal);
+  }
+}

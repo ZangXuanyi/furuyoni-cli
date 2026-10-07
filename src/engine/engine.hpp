@@ -263,6 +263,11 @@ class Engine {
   void play_card(Player p, int inst, bool asResponse, bool zenkai = false);
   void consume_enhance_crystal(int inst);
   void check_win();
+  // 戏剧特胜标记（what.md 裁定 2026-10-07：特胜/特败 → 赖着不死 → 复活；
+  // 戏剧特胜与诅咒特败无视复活，但允许赖着不死）。被标记玩家此后的死亡
+  // 不可被复活（最后的结晶/仙霄鬼泉不再拯救）。
+  void mark_irrevocable(Player p) { dramaMarked_[p] = true; }
+  bool irrevocable(Player p) const { return dramaMarked_[p]; }
 
   // ---- 20-Kanawe 叶慧: 地图 / 戏剧 ------------------------------------------
   // 当前节点的剧目数值 / 颜色（-1 无 / 0 红 / 1 紫 / 2 绿 / 3 黄）。
@@ -846,6 +851,7 @@ class Engine {
   int generatedAttacks_[2] = {0, 0};
   int enemyLifeDamageFired_[2] = {0, 0};
   int enemyAuraDamageFired_[2] = {0, 0};
+  bool dramaMarked_[2] = {false, false};  // 戏剧特胜标记：死亡不可复活
   // 20-Kanawe: 本回合的戏剧条件计数器。
   bool lifeChangedThisTurn_ = false;   // 《鼓动》基础: 某方命变化
   int lifeChangeMaxThisTurn_ = 0;      // 《鼓动》升级: 单次命变化量

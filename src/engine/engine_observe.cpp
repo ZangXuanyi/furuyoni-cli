@@ -338,6 +338,8 @@ uint64_t Engine::state_hash() const {
     putb(pendingAdvance_[i]);
     putb(pendingAdvanceTier_[i]);
   }
+  putb(dramaMarked_[0]);
+  putb(dramaMarked_[1]);
   put(distanceAtTurnStart_);
   put(distanceBaseline_);
   putb(zenkaiActive_);

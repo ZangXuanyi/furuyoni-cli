@@ -76,23 +76,33 @@ void Engine::drop_enhance_if_empty(int inst) {
 
 void Engine::check_win() {
   if (st.over) return;
+  // 死亡判定优先级（2026-10-07 裁定）：特胜/特败条件 → 赖着不死（埋骨地/阡）→
+  // 复活（仙霄鬼泉的死亡救援、最后的结晶）。其中**诅咒特败与戏剧特胜无视
+  // 复活**（但允许赖着不死）：埋骨地+16 诅咒可以继续；埋骨地离场即刻败，
+  // 复活不再询问。
   auto is_dead = [&](Player p) { return ps(p).life <= 0 || ps(p).curse >= 16; };
   bool dead[2] = {is_dead(P0), is_dead(P1)};
-  // 24-Shisui 埋骨地: 本牌展开中，持有者不会死亡。
+  bool curseDeath[2] = {ps(P0).curse >= 16, ps(P1).curse >= 16};
+  // 赖着不死：对一切死亡生效（含诅咒/戏剧）。
   for (int i = 0; i < 2; ++i)
     if (dead[i] && no_death(static_cast<Player>(i))) dead[i] = false;
   // 阡: 本牌弃置前，对手不会死亡。
   for (int i = 0; i < 2; ++i)
     if (dead[i] && protects_enemy(static_cast<Player>(i))) dead[i] = false;
-  // 23-Akina O-S3 仙霄鬼泉天元术「当你死亡时」（在最后的结晶之前结算）。
+  // 复活：诅咒特败与戏剧特胜跳过。
   for (int i = 0; i < 2; ++i) {
     const Player p = static_cast<Player>(i);
-    if (!dead[i]) continue;
+    if (!dead[i] || curseDeath[i] || dramaMarked_[p]) continue;
+    // 23-Akina O-S3 仙霄鬼泉天元术「当你死亡时」（在最后的结晶之前结算）。
     if (run_death_saves(p) && !is_dead(p)) dead[i] = false;
   }
   if (!dead[0] && !dead[1]) return;
-  for (int i = 0; i < 2; ++i)
-    if (dead[i] && try_revive(static_cast<Player>(i))) dead[i] = false;  // 最后的结晶
+  for (int i = 0; i < 2; ++i) {
+    const Player p = static_cast<Player>(i);
+    if (!dead[i] || curseDeath[i] || dramaMarked_[p]) continue;
+    if (try_revive(p)) dead[i] = false;  // 最后的结晶
+  }
+  if (!dead[0] && !dead[1]) return;  // 复活成功：无人死亡，对局继续
   if (dead[0] && dead[1]) {  // simultaneous death -> draw
     st.over = true;
     st.winner = -1;

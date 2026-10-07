@@ -257,7 +257,8 @@ bool Engine::advance_node(Player p, bool upgraded) {
   fire("node_advanced", p, nullptr, -1, false);
   if (st.over) return true;
   if (dest->terminal) {
-    die(opp(p));  // 走到终点：对手死亡
+    mark_irrevocable(opp(p));  // 戏剧特胜：对手的死亡无视复活（裁定 2026-10-07）
+    die(opp(p));               // 走到终点：对手死亡
     return true;
   }
   resolve_node_reward(p);  // 落格奖励（按颜色）
