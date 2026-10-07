@@ -46,7 +46,6 @@ ctest --test-dir build --output-on-failure
 | [`docs/testing.md`](docs/testing.md) | 测试体系：单元/模糊/ASan/语料对照方法 |
 | [`docs/rulings.md`](docs/rulings.md) | **规则语义裁定的唯一权威**（与 `rules/` 卡面冲突时以裁定为准） |
 | [`docs/content-modules.md`](docs/content-modules.md) | 内容模块/包/预设系统 |
-| [`docs/known-issues.md`](docs/known-issues.md) | 已知近似实现与维护须知 |
 | [`docs/refactor-log.md`](docs/refactor-log.md) | 2026-10 大重构日志与破坏性变更清单 |
 
 ## 第三方

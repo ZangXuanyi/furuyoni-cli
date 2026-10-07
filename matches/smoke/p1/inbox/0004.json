@@ -1,0 +1,446 @@
+{
+ "kind": "build",
+ "maxSelect": 3,
+ "minSelect": 3,
+ "options": [
+  {
+   "data": {
+    "break": false,
+    "cost": 5,
+    "def": 24,
+    "full_power": false,
+    "inst": 28,
+    "kind": "special",
+    "nagi": -1,
+    "name": "心胸所念",
+    "response": false,
+    "set": "honoka",
+    "terminal": false,
+    "text": "",
+    "type": "action"
+   },
+   "enabled": true,
+   "label": "心胸所念(5)"
+  },
+  {
+   "data": {
+    "break": false,
+    "cost": 4,
+    "damage": "3/2",
+    "def": 25,
+    "full_power": false,
+    "inst": 29,
+    "kind": "special",
+    "lock": false,
+    "nagi": -1,
+    "name": "在此旗的名义之下",
+    "overwhelm": false,
+    "range": "3-7",
+    "response": false,
+    "set": "honoka",
+    "terminal": false,
+    "text": "",
+    "type": "attack",
+    "unrespondable": false
+   },
+   "enabled": true,
+   "label": "在此旗的名义之下(4) [3-7 3/2]"
+  },
+  {
+   "data": {
+    "break": false,
+    "cost": 1,
+    "def": 26,
+    "full_power": false,
+    "inst": 30,
+    "kind": "special",
+    "nagi": -1,
+    "name": "四季轮回",
+    "response": true,
+    "set": "honoka",
+    "terminal": false,
+    "text": "",
+    "type": "action"
+   },
+   "enabled": true,
+   "label": "四季轮回(1)"
+  },
+  {
+   "data": {
+    "break": false,
+    "cost": 2,
+    "def": 27,
+    "full_power": false,
+    "inst": 31,
+    "kind": "special",
+    "nagi": 5,
+    "name": "漫天的花道",
+    "response": false,
+    "set": "honoka",
+    "terminal": false,
+    "text": "",
+    "type": "enhance"
+   },
+   "enabled": true,
+   "label": "漫天的花道(2) [纳5]"
+  },
+  {
+   "data": {
+    "break": false,
+    "cost": 4,
+    "damage": "2/3",
+    "def": 52,
+    "full_power": false,
+    "inst": 39,
+    "kind": "special",
+    "lock": false,
+    "nagi": -1,
+    "name": "飞雹式",
+    "overwhelm": false,
+    "range": "2-3",
+    "response": false,
+    "set": "konuru",
+    "terminal": false,
+    "text": "",
+    "type": "attack",
+    "unrespondable": false
+   },
+   "enabled": true,
+   "label": "飞雹式(4) [2-3 2/3]"
+  },
+  {
+   "data": {
+    "break": false,
+    "cost": 2,
+    "def": 53,
+    "full_power": false,
+    "inst": 40,
+    "kind": "special",
+    "nagi": -1,
+    "name": "白风式",
+    "response": true,
+    "set": "konuru",
+    "terminal": false,
+    "text": "",
+    "type": "action"
+   },
+   "enabled": true,
+   "label": "白风式(2)"
+  },
+  {
+   "data": {
+    "break": false,
+    "cost": 0,
+    "damage": "0/-",
+    "def": 54,
+    "full_power": false,
+    "inst": 41,
+    "kind": "special",
+    "lock": false,
+    "nagi": -1,
+    "name": "吹雪式",
+    "overwhelm": false,
+    "range": "3-6",
+    "response": false,
+    "set": "konuru",
+    "terminal": false,
+    "text": "",
+    "type": "attack",
+    "unrespondable": false
+   },
+   "enabled": true,
+   "label": "吹雪式(0) [3-6 0/-]"
+  }
+ ],
+ "player": 1,
+ "prompt": "choose special cards",
+ "state": {
+  "active": 0,
+  "build_pool": [
+   {
+    "break": false,
+    "cost": 5,
+    "def": 24,
+    "full_power": false,
+    "inst": 28,
+    "kind": "special",
+    "nagi": -1,
+    "name": "心胸所念",
+    "response": false,
+    "set": "honoka",
+    "terminal": false,
+    "text": "",
+    "type": "action"
+   },
+   {
+    "break": false,
+    "cost": 4,
+    "damage": "3/2",
+    "def": 25,
+    "full_power": false,
+    "inst": 29,
+    "kind": "special",
+    "lock": false,
+    "nagi": -1,
+    "name": "在此旗的名义之下",
+    "overwhelm": false,
+    "range": "3-7",
+    "response": false,
+    "set": "honoka",
+    "terminal": false,
+    "text": "",
+    "type": "attack",
+    "unrespondable": false
+   },
+   {
+    "break": false,
+    "cost": 1,
+    "def": 26,
+    "full_power": false,
+    "inst": 30,
+    "kind": "special",
+    "nagi": -1,
+    "name": "四季轮回",
+    "response": true,
+    "set": "honoka",
+    "terminal": false,
+    "text": "",
+    "type": "action"
+   },
+   {
+    "break": false,
+    "cost": 2,
+    "def": 27,
+    "full_power": false,
+    "inst": 31,
+    "kind": "special",
+    "nagi": 5,
+    "name": "漫天的花道",
+    "response": false,
+    "set": "honoka",
+    "terminal": false,
+    "text": "",
+    "type": "enhance"
+   },
+   {
+    "break": false,
+    "cost": 4,
+    "damage": "2/3",
+    "def": 52,
+    "full_power": false,
+    "inst": 39,
+    "kind": "special",
+    "lock": false,
+    "nagi": -1,
+    "name": "飞雹式",
+    "overwhelm": false,
+    "range": "2-3",
+    "response": false,
+    "set": "konuru",
+    "terminal": false,
+    "text": "",
+    "type": "attack",
+    "unrespondable": false
+   },
+   {
+    "break": false,
+    "cost": 2,
+    "def": 53,
+    "full_power": false,
+    "inst": 40,
+    "kind": "special",
+    "nagi": -1,
+    "name": "白风式",
+    "response": true,
+    "set": "konuru",
+    "terminal": false,
+    "text": "",
+    "type": "action"
+   },
+   {
+    "break": false,
+    "cost": 0,
+    "damage": "0/-",
+    "def": 54,
+    "full_power": false,
+    "inst": 41,
+    "kind": "special",
+    "lock": false,
+    "nagi": -1,
+    "name": "吹雪式",
+    "overwhelm": false,
+    "range": "3-6",
+    "response": false,
+    "set": "konuru",
+    "terminal": false,
+    "text": "",
+    "type": "attack",
+    "unrespondable": false
+   }
+  ],
+  "distance": 10,
+  "dust": 0,
+  "nearDistance": 2,
+  "players": [
+   {
+    "aim": -1,
+    "algorithmThisTurn": false,
+    "assembledCount": 0,
+    "aura": 3,
+    "bag": [],
+    "barracks": [],
+    "barracksMobilized": 0,
+    "cannotRespond": false,
+    "capital": 3,
+    "cardsPlayedThisTurn": 0,
+    "coverCount": 0,
+    "cower": false,
+    "curse": 0,
+    "damageTakenThisTurn": 0,
+    "deckCount": 7,
+    "discard": [],
+    "diving": false,
+    "doubtFailedThisTurn": false,
+    "dramas": [],
+    "enhance": [],
+    "fates": [
+     "",
+     "",
+     "",
+     ""
+    ],
+    "fatesEntangled": false,
+    "flare": 0,
+    "handCount": 0,
+    "hasSoil": false,
+    "ice": 0,
+    "life": 10,
+    "market": 0,
+    "memoryCount": 0,
+    "node": "O2",
+    "oppAttackedLastTurn": false,
+    "partsTotal": 0,
+    "plants": 0,
+    "position": true,
+    "resonanceCountThisTurn": 0,
+    "seeds": 0,
+    "sets": [
+     "honoka",
+     "konuru"
+    ],
+    "special": [
+     {
+      "hidden": true,
+      "owner": 0
+     },
+     {
+      "hidden": true,
+      "owner": 0
+     },
+     {
+      "hidden": true,
+      "owner": 0
+     }
+    ],
+    "stockPrice": 2,
+    "strategy": 0,
+    "tailwind": true,
+    "tree": [],
+    "treeActive": false,
+    "umbrella": true,
+    "vigor": 0,
+    "waku": 0,
+    "wounds": {
+     "aura": [
+      0,
+      0
+     ],
+     "flare": [
+      0,
+      0
+     ],
+     "life": [
+      0,
+      0
+     ]
+    },
+    "yukihi": false
+   },
+   {
+    "aim": -1,
+    "algorithmThisTurn": false,
+    "aura": 3,
+    "bag": [],
+    "barracks": [],
+    "barracksMobilized": 0,
+    "cannotRespond": false,
+    "capital": 3,
+    "cardsPlayedThisTurn": 0,
+    "coverCount": 0,
+    "cower": false,
+    "curse": 0,
+    "damageTakenThisTurn": 0,
+    "deckCount": 7,
+    "discard": [],
+    "dive": 0,
+    "diving": false,
+    "doubtFailedThisTurn": false,
+    "dramas": [],
+    "enhance": [],
+    "fates": [
+     "",
+     "",
+     "",
+     ""
+    ],
+    "fatesEntangled": false,
+    "flare": 0,
+    "hand": [],
+    "handCount": 0,
+    "hasSoil": false,
+    "ice": 0,
+    "life": 10,
+    "market": 0,
+    "memory": [],
+    "memoryCount": 0,
+    "node": "O2",
+    "oppAttackedLastTurn": false,
+    "parts": [],
+    "plants": 0,
+    "position": true,
+    "resonanceCountThisTurn": 0,
+    "seeds": 0,
+    "sets": [
+     "honoka",
+     "konuru"
+    ],
+    "special": [],
+    "stockPrice": 2,
+    "strategy": 0,
+    "tailwind": true,
+    "tree": [],
+    "treeActive": false,
+    "umbrella": true,
+    "vigor": 0,
+    "waku": 0,
+    "wounds": {
+     "aura": [
+      0,
+      0
+     ],
+     "flare": [
+      0,
+      0
+     ],
+     "life": [
+      0,
+      0
+     ]
+    },
+    "yukihi": false
+   }
+  ],
+  "turn": 1,
+  "you": 1
+ }
+}

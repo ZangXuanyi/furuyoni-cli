@@ -1,0 +1,181 @@
+{
+ "kind": "draft_ban",
+ "maxSelect": 1,
+ "minSelect": 1,
+ "options": [
+  {
+   "data": {
+    "form": "O",
+    "goddess": "utsuro"
+   },
+   "enabled": true,
+   "label": "utsuro (O)"
+  },
+  {
+   "data": {
+    "form": "O",
+    "goddess": "honoka"
+   },
+   "enabled": true,
+   "label": "honoka (O)"
+  },
+  {
+   "data": {
+    "form": "O",
+    "goddess": "konuru"
+   },
+   "enabled": true,
+   "label": "konuru (O)"
+  }
+ ],
+ "player": 1,
+ "prompt": "ban one of the opponent's goddesses",
+ "state": {
+  "active": 0,
+  "distance": 10,
+  "dust": 0,
+  "nearDistance": 2,
+  "players": [
+   {
+    "aim": -1,
+    "algorithmThisTurn": false,
+    "assembledCount": 0,
+    "aura": 3,
+    "bag": [],
+    "barracks": [],
+    "barracksMobilized": 0,
+    "cannotRespond": false,
+    "capital": 3,
+    "cardsPlayedThisTurn": 0,
+    "coverCount": 0,
+    "cower": false,
+    "curse": 0,
+    "damageTakenThisTurn": 0,
+    "deckCount": 0,
+    "discard": [],
+    "diving": false,
+    "doubtFailedThisTurn": false,
+    "dramas": [],
+    "enhance": [],
+    "fates": [
+     "",
+     "",
+     "",
+     ""
+    ],
+    "fatesEntangled": false,
+    "flare": 0,
+    "handCount": 0,
+    "hasSoil": false,
+    "ice": 0,
+    "life": 10,
+    "market": 0,
+    "memoryCount": 0,
+    "node": "O2",
+    "oppAttackedLastTurn": false,
+    "partsTotal": 0,
+    "plants": 0,
+    "position": true,
+    "resonanceCountThisTurn": 0,
+    "seeds": 0,
+    "sets": [],
+    "special": [],
+    "stockPrice": 2,
+    "strategy": 0,
+    "tailwind": true,
+    "tree": [],
+    "treeActive": false,
+    "umbrella": true,
+    "vigor": 0,
+    "waku": 0,
+    "wounds": {
+     "aura": [
+      0,
+      0
+     ],
+     "flare": [
+      0,
+      0
+     ],
+     "life": [
+      0,
+      0
+     ]
+    },
+    "yukihi": false
+   },
+   {
+    "aim": -1,
+    "algorithmThisTurn": false,
+    "aura": 3,
+    "bag": [],
+    "barracks": [],
+    "barracksMobilized": 0,
+    "cannotRespond": false,
+    "capital": 3,
+    "cardsPlayedThisTurn": 0,
+    "coverCount": 0,
+    "cower": false,
+    "curse": 0,
+    "damageTakenThisTurn": 0,
+    "deckCount": 0,
+    "discard": [],
+    "dive": 0,
+    "diving": false,
+    "doubtFailedThisTurn": false,
+    "dramas": [],
+    "enhance": [],
+    "fates": [
+     "",
+     "",
+     "",
+     ""
+    ],
+    "fatesEntangled": false,
+    "flare": 0,
+    "hand": [],
+    "handCount": 0,
+    "hasSoil": false,
+    "ice": 0,
+    "life": 10,
+    "market": 0,
+    "memory": [],
+    "memoryCount": 0,
+    "node": "O2",
+    "oppAttackedLastTurn": false,
+    "parts": [],
+    "plants": 0,
+    "position": true,
+    "resonanceCountThisTurn": 0,
+    "seeds": 0,
+    "sets": [],
+    "special": [],
+    "stockPrice": 2,
+    "strategy": 0,
+    "tailwind": true,
+    "tree": [],
+    "treeActive": false,
+    "umbrella": true,
+    "vigor": 0,
+    "waku": 0,
+    "wounds": {
+     "aura": [
+      0,
+      0
+     ],
+     "flare": [
+      0,
+      0
+     ],
+     "life": [
+      0,
+      0
+     ]
+    },
+    "yukihi": false
+   }
+  ],
+  "turn": 1,
+  "you": 1
+ }
+}

@@ -1,0 +1,207 @@
+{
+ "kind": "option",
+ "maxSelect": 1,
+ "minSelect": 1,
+ "options": [
+  {
+   "data": null,
+   "enabled": true,
+   "label": "不重铸"
+  },
+  {
+   "data": null,
+   "enabled": true,
+   "label": "正常重铸（1 命伤 + 洗牌）"
+  }
+ ],
+ "player": 1,
+ "prompt": "重铸牌库？",
+ "state": {
+  "active": 1,
+  "distance": 2,
+  "dust": 28,
+  "nearDistance": 2,
+  "players": [
+   {
+    "aim": -1,
+    "algorithmThisTurn": false,
+    "assembledCount": 0,
+    "aura": 0,
+    "bag": [],
+    "barracks": [],
+    "barracksMobilized": 0,
+    "cannotRespond": false,
+    "capital": 0,
+    "cardsPlayedThisTurn": 0,
+    "coverCount": 7,
+    "cower": false,
+    "curse": 0,
+    "damageTakenThisTurn": 0,
+    "deckCount": 0,
+    "discard": [],
+    "diving": false,
+    "doubtFailedThisTurn": false,
+    "dramas": [],
+    "enhance": [],
+    "fates": [
+     "",
+     "",
+     "",
+     ""
+    ],
+    "fatesEntangled": false,
+    "flare": 0,
+    "handCount": 0,
+    "hasSoil": false,
+    "ice": 0,
+    "life": 3,
+    "market": 0,
+    "memoryCount": 0,
+    "node": "O2",
+    "oppAttackedLastTurn": false,
+    "partsTotal": 0,
+    "plants": 0,
+    "position": true,
+    "resonanceCountThisTurn": 0,
+    "seeds": 0,
+    "sets": [
+     "honoka",
+     "konuru"
+    ],
+    "special": [
+     {
+      "hidden": true,
+      "owner": 0
+     },
+     {
+      "inst": 9,
+      "name": "四季轮回",
+      "owner": 0,
+      "used": true
+     },
+     {
+      "hidden": true,
+      "owner": 0
+     }
+    ],
+    "stockPrice": 2,
+    "strategy": 0,
+    "tailwind": true,
+    "tree": [],
+    "treeActive": false,
+    "umbrella": true,
+    "vigor": 0,
+    "waku": 0,
+    "wounds": {
+     "aura": [
+      0,
+      0
+     ],
+     "flare": [
+      0,
+      0
+     ],
+     "life": [
+      0,
+      0
+     ]
+    },
+    "yukihi": false
+   },
+   {
+    "aim": -1,
+    "algorithmThisTurn": false,
+    "aura": 0,
+    "bag": [],
+    "barracks": [],
+    "barracksMobilized": 0,
+    "cannotRespond": false,
+    "capital": 0,
+    "cardsPlayedThisTurn": 0,
+    "coverCount": 7,
+    "cower": false,
+    "curse": 0,
+    "damageTakenThisTurn": 0,
+    "deckCount": 0,
+    "discard": [],
+    "dive": 0,
+    "diving": false,
+    "doubtFailedThisTurn": false,
+    "dramas": [],
+    "enhance": [],
+    "fates": [
+     "",
+     "",
+     "",
+     ""
+    ],
+    "fatesEntangled": false,
+    "flare": 0,
+    "hand": [],
+    "handCount": 0,
+    "hasSoil": false,
+    "ice": 0,
+    "life": 3,
+    "market": 0,
+    "memory": [],
+    "memoryCount": 0,
+    "node": "O2",
+    "oppAttackedLastTurn": false,
+    "parts": [],
+    "plants": 0,
+    "position": true,
+    "resonanceCountThisTurn": 0,
+    "seeds": 0,
+    "sets": [
+     "honoka",
+     "konuru"
+    ],
+    "special": [
+     {
+      "inst": 29,
+      "name": "在此旗的名义之下",
+      "owner": 1,
+      "used": false
+     },
+     {
+      "inst": 30,
+      "name": "四季轮回",
+      "owner": 1,
+      "used": true
+     },
+     {
+      "inst": 42,
+      "name": "双掌生花",
+      "owner": 1,
+      "used": false
+     }
+    ],
+    "stockPrice": 2,
+    "strategy": 0,
+    "tailwind": true,
+    "tree": [],
+    "treeActive": false,
+    "umbrella": true,
+    "vigor": 1,
+    "waku": 0,
+    "wounds": {
+     "aura": [
+      0,
+      0
+     ],
+     "flare": [
+      0,
+      0
+     ],
+     "life": [
+      0,
+      0
+     ]
+    },
+    "yukihi": false
+   }
+  ],
+  "turn": 24,
+  "you": 1
+ }
+}
