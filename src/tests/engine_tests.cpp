@@ -5145,7 +5145,7 @@ TEST_CASE("安琪娜: 交易终端、资本多则执行基本动作、多 3 则�
   load_all_content(e);
   AkinaAgent a0;
   a0.rule("交易", "斩");
-  a0.rule("free basic action", "basic: flare");  // 聚气：资本不变
+  a0.rule("free basic action", "基本动作：聚气");  // 聚气：资本不变
   a0.pickOptional = true;
   FirstAgent a1;
   akina_setup(e, "yurina", &a0, &a1);
@@ -6550,4 +6550,43 @@ TEST_CASE("难点6+7: 谎言的武器重铸宣称——质疑失败与回归；�
     CHECK_FALSE(sawClaim);  // 电子设置不出现宣称询问
     CHECK(e.ci(weapon).zone == Zone::Cover);
   }
+}
+
+TEST_CASE("对应窗口请求携带被对应攻击的摘要（data.attack）") {
+  Config cfg = make_cfg("standard", 1);
+  Engine e(cfg);
+  e.load_content(find_file("content/kamuwi.lua"));
+  e.load_content(find_file("content/tokoyo.lua"));
+  RecordingAgent rec;  // 定义于 reveal_cards 测试
+  FindOptionAgent pick("久远之花");
+  rec.inner = &pick;
+  std::vector<Request> reqs;
+  rec.sink = &reqs;
+  e.set_agent(P0, &rec);
+  FirstAgent a;
+  e.set_agent(P1, &a);
+  int xiao = e.add_instance(find_def(e, "kamuwi", "晓"), P1);
+  e.move_card(xiao, Zone::Special);
+  int flower = e.add_instance(find_def(e, "tokoyo", "久远之花"), P0);
+  e.move_card(flower, Zone::Special);
+  e.ci(flower).faceUp = false;
+  e.move(AreaRef::life(P1), AreaRef::flare(P1), 6, false);
+  e.move(AreaRef::life(P0), AreaRef::flare(P0), 5, false);
+  e.move(AreaRef::distance(), AreaRef::dust(), 3, false);
+  e.st.active = P1;
+  e.play_card(P1, xiao, false);
+  const Request* resp = nullptr;
+  for (const Request& r : reqs)
+    if (r.kind == "response") resp = &r;
+  REQUIRE(resp);
+  CHECK(resp->data.contains("attack"));
+  auto atk = resp->data["attack"];
+  CHECK(atk["source"] == "晓");
+  CHECK(atk["range"] == "3-7");
+  CHECK(atk["damage"] == "6/4");  // 声明锁定值（对应后才 -1/-1）
+  bool hasOverwhelm = false;
+  for (auto& k : atk["keywords"])
+    if (k == "超克") hasOverwhelm = true;
+  CHECK(hasOverwhelm);
+  CHECK(atk["attacker"] == 1);
 }

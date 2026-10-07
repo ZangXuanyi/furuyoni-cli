@@ -503,8 +503,33 @@ void Engine::resolve_attack(Attack& a) {
     if (!resp.empty()) {
       Request r;
       r.kind = "response";
-      r.prompt = "respond to the attack?";
-      r.options.push_back({"pass", true, {{"kind", "pass"}}});
+      r.prompt = "对应窗口：是否打出对应牌？（下方 data.attack 是正在对应的攻击）";
+      // 正在对应的攻击摘要（攻击距离/伤害/词条）——防守方决策必需的信息。
+      {
+        nlohmann::json atk;
+        atk["source"] = a.sourceInst >= 0 ? def_of(a.sourceInst).name : std::string("（无来源）");
+        atk["range"] = a.range.to_string();
+        std::optional<int> ea = a.aura, el = a.life;
+        if (ea) *ea += a.auraDelta;
+        if (el) *el += a.lifeDelta;
+        auto dstr = [](const std::optional<int>& o) {
+          return o ? std::to_string(*o) : std::string("-");
+        };
+        atk["damage"] = dstr(ea) + "/" + dstr(el);
+        nlohmann::json kws = nlohmann::json::array();
+        if (a.keywords & AF_Unrespondable) kws.push_back("不可对");
+        if (a.keywords & AF_Lock) kws.push_back("锁定");
+        if (a.keywords & AF_Overwhelm) kws.push_back("超克");
+        if (a.keywords & AF_BothSides) kws.push_back("两侧伤害");
+        if (a.keywords & AF_NoSpecialResponse) kws.push_back("切牌不可对");
+        if (a.keywords & AF_NoNormalResponse) kws.push_back("通常牌不可对");
+        if (a.wound) kws.push_back("裂伤攻击");
+        atk["keywords"] = kws;
+        atk["attacker"] = static_cast<int>(a.attacker);
+        atk["from_special"] = a.fromSpecial;
+        r.data = {{"attack", atk}};
+      }
+      r.options.push_back({"不对应（放弃）", true, {{"kind", "pass"}}});
       for (int inst : resp) {
         Option o;
         o.label = card_label(def_of(inst));

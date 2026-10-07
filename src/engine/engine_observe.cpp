@@ -442,6 +442,19 @@ nlohmann::json Engine::observation(Player v) const {
       for (int inst : s.memory) mem.push_back(def_of(inst).name);
       pj["memory"] = mem;
     }
+    if (pi == static_cast<int>(v)) {
+      // 仅本人可见：手牌、盖牌堆内容、牌山内容（deck[0] = 牌山顶，实际顺序）。
+      json hand = json::array();
+      for (int inst : s.hand) hand.push_back(def_of(inst).name);
+      pj["hand"] = hand;
+      json cover = json::array();
+      for (int inst : s.cover) cover.push_back(def_of(inst).name);
+      pj["cover"] = cover;
+      json deck = json::array();
+      for (auto it = s.deck.rbegin(); it != s.deck.rend(); ++it)
+        deck.push_back(def_of(*it).name);
+      pj["deck"] = deck;
+    }
     json disc = json::array();
     for (int inst : s.discard) disc.push_back(def_of(inst).name);
     pj["discard"] = disc;

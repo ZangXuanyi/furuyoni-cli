@@ -1,6 +1,7 @@
 #include "engine/engine.hpp"
 
 #include <algorithm>
+#include <future>
 #include <cstring>
 #include <limits>
 #include <map>
@@ -34,26 +35,7 @@ Decision Engine::decide(Player p, Request req) {
   if (!st.over && (pendingAdvance_[P0] || pendingAdvance_[P1])) flush_drama_advances();
   if (req.state.is_null()) req.state = observation(p);
 
-  int fi = -1;
-  if (tracing_) {
-    using nlohmann::json;
-    json f;
-    f["label"] = req.kind;
-    f["player"] = static_cast<int>(p);
-    f["prompt"] = req.prompt;
-    f["options"] = json::array();
-    for (const Option& o : req.options) {
-      json jo;
-      jo["label"] = o.label;
-      jo["enabled"] = o.enabled;
-      if (!o.data.is_null()) jo["data"] = o.data;
-      f["options"].push_back(jo);
-    }
-    f["state"] = full_state_json();
-    frames_.push_back(std::move(f));
-    fi = static_cast<int>(frames_.size()) - 1;
-  }
-
+  int fi = push_trace_frame(p, req);
   Decision d;
   if (replaying_) {
     if (replay_pos_ >= journal_.size()) throw std::runtime_error("replay: journal exhausted");
@@ -64,12 +46,40 @@ Decision Engine::decide(Player p, Request req) {
   } else {
     d = agents_[p] ? agents_[p]->decide(req) : FirstAgent{}.decide(req);
   }
+  return finalize_decision(p, req, std::move(d), fi);
+}
+
+// 追加一个 trace 帧（返回帧下标；未开 tracing 返回 -1）。智能体 IO 期间引擎
+// 状态不变，帧在 IO 之后推送与请求时刻等价——decide_both 依赖这一点做固定
+// 顺序的串行簿记。
+int Engine::push_trace_frame(Player p, const Request& req) {
+  if (!tracing_) return -1;
+  using nlohmann::json;
+  json f;
+  f["label"] = req.kind;
+  f["player"] = static_cast<int>(p);
+  f["prompt"] = req.prompt;
+  f["options"] = json::array();
+  for (const Option& o : req.options) {
+    json jo;
+    jo["label"] = o.label;
+    jo["enabled"] = o.enabled;
+    if (!o.data.is_null()) jo["data"] = o.data;
+    if (!o.data.is_null() && o.data.contains("attack")) f["data"] = req.data;
+    f["options"].push_back(jo);
+  }
+  f["state"] = full_state_json();
+  frames_.push_back(std::move(f));
+  return static_cast<int>(frames_.size()) - 1;
+}
+
+// 决策的净化与簿记（非法计数/回放校验/日志/trace 选择回填）。
+Decision Engine::finalize_decision(Player p, const Request& req, Decision d, int fi) {
   // Untrusted input (external agents, malformed journals): repair before use.
   d = sanitize_decision(p, req, std::move(d));
   if (replaying_ && illegalCount_[p] > 0)
     throw std::runtime_error("replay: journal contains an illegal decision");
   if (recording_) journal_.push_back({p, req.kind, d.indices});
-
   if (tracing_ && fi >= 0) {
     using nlohmann::json;
     json ch = json::array();
@@ -78,6 +88,31 @@ Decision Engine::decide(Player p, Request req) {
     frames_[static_cast<size_t>(fi)]["choice"] = ch;
   }
   return d;
+}
+
+// 并行询问双方（三拾/一舍/眼前构筑/换牌）：线程只做智能体 IO；簿记按 P0→P1
+// 固定顺序串行，回放/日志顺序与线程完成顺序无关。
+std::pair<Decision, Decision> Engine::decide_both(Request ra, Request rb) {
+  ra.player = P0;
+  rb.player = P1;
+  if (!st.over && (pendingAdvance_[P0] || pendingAdvance_[P1])) flush_drama_advances();
+  if (ra.state.is_null()) ra.state = observation(P0);
+  if (rb.state.is_null()) rb.state = observation(P1);
+  Agent* a0 = agents_[P0];
+  Agent* a1 = agents_[P1];
+  if (replaying_ || !a0 || !a1 || a0 == a1) {
+    // 回放 / 共享智能体 / 缺席：顺序询问（决策结果与并行等价）。
+    return {decide(P0, std::move(ra)), decide(P1, std::move(rb))};
+  }
+  auto fut0 = std::async(std::launch::async, [a0, ra]() mutable { return a0->decide(ra); });
+  auto fut1 = std::async(std::launch::async, [a1, rb]() mutable { return a1->decide(rb); });
+  Decision d0 = fut0.get();
+  Decision d1 = fut1.get();
+  const int f0 = push_trace_frame(P0, ra);
+  const int f1 = push_trace_frame(P1, rb);
+  d0 = finalize_decision(P0, ra, std::move(d0), f0);
+  d1 = finalize_decision(P1, rb, std::move(d1), f1);
+  return {d0, d1};
 }
 
 // Repair an untrusted decision so that the engine can never index out of range
@@ -926,7 +961,7 @@ void Engine::free_basics(Player p, int maxTimes) {
     r.kind = "option";
     r.prompt = "free basic action";
     for (BasicAction ba : legal)
-      r.options.push_back({std::string("basic: ") + basic_name(ba), true, {}});
+      r.options.push_back({std::string("基本动作：") + basic_cn(ba), true, {}});
     r.options.push_back({"stop", true, {}});
     int idx = ask_one(p, std::move(r));
     if (idx >= static_cast<int>(legal.size())) return;
@@ -953,7 +988,7 @@ void Engine::free_basics_of(Player p, int maxTimes, const std::vector<std::strin
     r.kind = "option";
     r.prompt = "free basic action";
     for (BasicAction ba : legal)
-      r.options.push_back({std::string("basic: ") + basic_name(ba), true, {}});
+      r.options.push_back({std::string("基本动作：") + basic_cn(ba), true, {}});
     r.options.push_back({"stop", true, {}});
     int idx = ask_one(p, std::move(r));
     if (idx >= static_cast<int>(legal.size())) return;
@@ -1160,7 +1195,7 @@ void Engine::main_phase(Player p) {
     std::vector<Move> moves;
     Request r;
     r.kind = "main";
-    r.prompt = "main phase action";
+    r.prompt = "主要阶段：选择动作（基本动作/打出牌/切札/结束）";
     bool canCover = false;
     for (int inst : ps(p).hand)
       if (!is_poison(inst)) {
@@ -1207,7 +1242,8 @@ void Engine::main_phase(Player p) {
           m.payCover = payCover;
           moves.push_back(m);
           Option o;
-          o.label = std::string("basic: ") + basic_name(ba) + (payCover ? " (cover)" : " (vigor)");
+          o.label = std::string("基本动作：") + basic_cn(ba) +
+                    (payCover ? "（盖伏一张手牌支付）" : "（支付集中力）");
           o.data = {{"kind", "basic"}, {"basic", basic_name(ba)}, {"pay_cover", payCover}};
           r.options.push_back(o);
         }
@@ -1405,7 +1441,7 @@ void Engine::main_phase(Player p) {
     Move pass;
     pass.k = Move::Pass;
     moves.push_back(pass);
-    r.options.push_back({"pass", true, {{"kind", "pass"}}});
+    r.options.push_back({"结束主要阶段", true, {{"kind", "pass"}}});
 
     Decision dec = decide(p, r);
     int idx = dec.indices.empty() ? static_cast<int>(moves.size()) - 1 : dec.indices[0];
@@ -2175,6 +2211,18 @@ void Engine::play_hand_card_response(Player p, int inst) {
 int Engine::attacks_and_responses_this_turn() const {
   return attacksThisTurn_[P0] + attacksThisTurn_[P1] + ps(P0).responsesPlayedThisTurn +
          ps(P1).responsesPlayedThisTurn;
+}
+
+// 基本动作的中文名（选项标签用；data.basic 仍为英文键）。
+const char* basic_cn(BasicAction a) {
+  switch (a) {
+    case BasicAction::Advance: return "前进";
+    case BasicAction::Retreat: return "后退";
+    case BasicAction::Aura:    return "装附";
+    case BasicAction::Flare:   return "聚气";
+    case BasicAction::Escape:  return "离脱";
+  }
+  return "?";
 }
 
 void Engine::note_life_change(int delta) {

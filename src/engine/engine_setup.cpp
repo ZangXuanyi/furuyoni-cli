@@ -96,8 +96,13 @@ void Engine::setup_player(Player p, const std::vector<std::pair<std::string, std
   }
   init_barracks(p, picks);
 
-  build_from_pool(p, normals, specials);
-  init_start_used(p);  // 22-Renri 道化的觉悟: 开局即使用后状态
+  if (deferBuild_) {
+    buildNormals_[static_cast<int>(p)] = normals;
+    buildSpecials_[static_cast<int>(p)] = specials;
+  } else {
+    build_from_pool(p, normals, specials);
+    init_start_used(p);  // 22-Renri 道化的觉悟: 开局即使用后状态
+  }
 }
 
 // 18-Mizuki: 兵舍初始构成 = 该形态的全部士兵牌，背面向上（未动员）置于兵舍。
@@ -212,16 +217,20 @@ void Engine::setup_player_sets(Player p, const std::vector<std::string>& sets) {
     if (!innearla && std::find(sets.begin(), sets.end(), d.set) == sets.end()) continue;
     add_def(d.id);
   }
-  build_from_pool(p, normals, specials);
-  init_start_used(p);  // 22-Renri 道化的觉悟: 开局即使用后状态
+  if (deferBuild_) {
+    buildNormals_[static_cast<int>(p)] = normals;
+    buildSpecials_[static_cast<int>(p)] = specials;
+  } else {
+    build_from_pool(p, normals, specials);
+    init_start_used(p);  // 22-Renri 道化的觉悟: 开局即使用后状态
+  }
 }
 
-void Engine::build_from_pool(Player p, std::vector<int>& normals, std::vector<int>& specials) {
-  auto choose = [&](std::vector<int>& pool, int want, const char* what) {
-    if (pool.empty()) return;
-    Request r;
-    r.kind = "build";
-    r.prompt = std::string("choose ") + what;
+Request Engine::build_request(Player p, std::vector<int>& pool, int want, const char* what) {
+  Request r;
+  r.kind = "build";
+  if (!pool.empty()) {
+    r.prompt = what;
     for (int inst : pool) {
       Option o;
       o.label = card_label(def_of(inst));
@@ -232,28 +241,42 @@ void Engine::build_from_pool(Player p, std::vector<int>& normals, std::vector<in
     int need = std::min(want, static_cast<int>(pool.size()));
     r.minSel = need;
     r.maxSel = need;
-    r.state = observation(p);
-    r.state["build_pool"] = nlohmann::json::array();
-    for (auto& o : r.options) r.state["build_pool"].push_back(o.data);
-    Decision d = decide(p, std::move(r));
-    std::vector<int> chosen;
-    for (int i : d.indices)
-      if (i >= 0 && i < static_cast<int>(pool.size())) chosen.push_back(pool[static_cast<size_t>(i)]);
-    for (int inst : pool) {
-      if (static_cast<int>(chosen.size()) >= need) break;
-      if (!vec_has(chosen, inst)) chosen.push_back(inst);
+  }
+  r.state = observation(p);
+  r.state["build_pool"] = nlohmann::json::array();
+  for (auto& o : r.options) r.state["build_pool"].push_back(o.data);
+  return r;
+}
+
+void Engine::build_apply(std::vector<int>& pool, int want, const Decision& d) {
+  if (pool.empty()) return;
+  int need = std::min(want, static_cast<int>(pool.size()));
+  std::vector<int> chosen;
+  for (int i : d.indices)
+    if (i >= 0 && i < static_cast<int>(pool.size())) chosen.push_back(pool[static_cast<size_t>(i)]);
+  for (int inst : pool) {
+    if (static_cast<int>(chosen.size()) >= need) break;
+    if (!vec_has(chosen, inst)) chosen.push_back(inst);
+  }
+  for (int inst : chosen) {
+    if (def_of(inst).kind == CardKind::Special) {
+      move_card(inst, Zone::Special);
+      ci(inst).faceUp = false;  // unused 切札 start face down
+    } else {
+      move_card(inst, Zone::Deck);
     }
-    for (int inst : chosen) {
-      if (def_of(inst).kind == CardKind::Special) {
-        move_card(inst, Zone::Special);
-        ci(inst).faceUp = false;  // unused 切札 start face down
-      } else {
-        move_card(inst, Zone::Deck);
-      }
-    }
-  };
-  choose(normals, 7, "normal cards");
-  choose(specials, 3, "special cards");
+  }
+}
+
+void Engine::build_finish(Player p) {
+  st.rng.shuffle(ps(p).deck);
+  float_poisons(p);
+  init_start_used(p);  // 22-Renri 道化的觉悟: 开局即使用后状态
+}
+
+void Engine::build_from_pool(Player p, std::vector<int>& normals, std::vector<int>& specials) {
+  build_apply(normals, 7, decide(p, build_request(p, normals, 7, "眼前构筑：常规牌（选 7 张）")));
+  build_apply(specials, 3, decide(p, build_request(p, specials, 3, "眼前构筑：切札（选 3 张）")));
   st.rng.shuffle(ps(p).deck);
   float_poisons(p);
 }
@@ -270,8 +293,8 @@ void Engine::init_bag(Player p) {
     }
 }
 
-std::vector<std::pair<std::string, std::string>> Engine::draft_pick(Player p) {
-  std::vector<std::pair<std::string, std::string>> opts;
+Request Engine::draft_pick_request(std::vector<std::pair<std::string, std::string>>& opts,
+                                    Player p) {
   const std::vector<std::string> pool =
       cfg.draftPool.empty() ? goddess_pool() : cfg.draftPool;
   for (const auto& g : pool)
@@ -284,7 +307,7 @@ std::vector<std::pair<std::string, std::string>> Engine::draft_pick(Player p) {
         "(check --goddesses / --packs / --content-dir / --allow-custom)");
   Request r;
   r.kind = "draft_pick";
-  r.prompt = "choose three goddesses (with form)";
+  r.prompt = "三拾：选择三位女神（含形态；之后对手会禁用其中一柱）";
   for (const auto& [g, f] : opts) {
     Option o;
     o.label = g + " (" + f + ")";
@@ -294,7 +317,11 @@ std::vector<std::pair<std::string, std::string>> Engine::draft_pick(Player p) {
   r.minSel = std::min<int>(3, static_cast<int>(opts.size()));
   r.maxSel = r.minSel;
   r.state = observation(p);
-  Decision d = decide(p, std::move(r));
+  return r;
+}
+
+std::vector<std::pair<std::string, std::string>> Engine::draft_pick_parse(
+    const std::vector<std::pair<std::string, std::string>>& opts, const Decision& d) {
   std::vector<std::pair<std::string, std::string>> sel;
   auto has_goddess = [&](const std::string& g) {
     for (auto& s : sel)
@@ -306,6 +333,8 @@ std::vector<std::pair<std::string, std::string>> Engine::draft_pick(Player p) {
       auto c = opts[static_cast<size_t>(i)];
       if (!has_goddess(c.first)) sel.push_back(c);
     }
+  const std::vector<std::string> pool =
+      cfg.draftPool.empty() ? goddess_pool() : cfg.draftPool;
   for (const auto& g : pool) {
     if (static_cast<int>(sel.size()) >= 3) break;
     if (has_goddess(g)) continue;
@@ -315,12 +344,16 @@ std::vector<std::pair<std::string, std::string>> Engine::draft_pick(Player p) {
   return sel;
 }
 
-std::pair<std::string, std::string> Engine::draft_ban(
-    Player p, const std::vector<std::pair<std::string, std::string>>& opp) {
-  if (opp.empty()) return {"", ""};  // 防御：没有可禁的柱（不应发生，见 draft_pick）
+std::vector<std::pair<std::string, std::string>> Engine::draft_pick(Player p) {
+  std::vector<std::pair<std::string, std::string>> opts;
+  return draft_pick_parse(opts, decide(p, draft_pick_request(opts, p)));
+}
+
+Request Engine::draft_ban_request(const std::vector<std::pair<std::string, std::string>>& opp,
+                                  Player p) {
   Request r;
   r.kind = "draft_ban";
-  r.prompt = "ban one of the opponent's goddesses";
+  r.prompt = "一舍：禁用对手三位女神中的一柱";
   for (const auto& [g, f] : opp) {
     Option o;
     o.label = g + " (" + f + ")";
@@ -330,7 +363,13 @@ std::pair<std::string, std::string> Engine::draft_ban(
   r.minSel = 1;
   r.maxSel = 1;
   r.state = observation(p);
-  Decision d = decide(p, std::move(r));
+  return r;
+}
+
+std::pair<std::string, std::string> Engine::draft_ban(
+    Player p, const std::vector<std::pair<std::string, std::string>>& opp) {
+  if (opp.empty()) return {"", ""};  // 防御：没有可禁的柱（不应发生，见 draft_pick）
+  Decision d = decide(p, draft_ban_request(opp, p));
   int i = d.indices.empty() ? 0 : d.indices[0];
   if (i < 0 || i >= static_cast<int>(opp.size())) i = 0;
   return opp[static_cast<size_t>(i)];
@@ -344,11 +383,17 @@ void Engine::setup_match() {
   illegalCount_[0] = illegalCount_[1] = 0;
   forfeited_ = false;
   if (cfg.mode == "standard") {
-    // 三拾一舍: pick 3 (goddess+form, secret, sync), then ban 1 of the opponent's 3.
-    auto p0sel = draft_pick(P0);
-    auto p1sel = draft_pick(P1);
-    auto p0bans = draft_ban(P0, p1sel);  // P0 removes one of P1's
-    auto p1bans = draft_ban(P1, p0sel);  // P1 removes one of P0's
+    // 三拾一舍（双方同时，2026-10-07 裁定）：三拾并行 → 一舍并行。
+    std::vector<std::pair<std::string, std::string>> poolOpts;
+    auto [pk0, pk1] = decide_both(draft_pick_request(poolOpts, P0),
+                                  draft_pick_request(poolOpts, P1));
+    auto p0sel = draft_pick_parse(poolOpts, pk0);
+    auto p1sel = draft_pick_parse(poolOpts, pk1);
+    auto [bn0, bn1] = decide_both(draft_ban_request(p1sel, P0), draft_ban_request(p0sel, P1));
+    auto p0bans = [&]{ int i = bn0.indices.empty() ? 0 : bn0.indices[0];
+                       if (i < 0 || i >= (int)p1sel.size()) i = 0; return p1sel[i]; }();
+    auto p1bans = [&]{ int i = bn1.indices.empty() ? 0 : bn1.indices[0];
+                       if (i < 0 || i >= (int)p0sel.size()) i = 0; return p0sel[i]; }();
     auto drop = [](std::vector<std::pair<std::string, std::string>>& v,
                    const std::pair<std::string, std::string>& s) {
       v.erase(std::remove(v.begin(), v.end(), s), v.end());
@@ -360,8 +405,21 @@ void Engine::setup_match() {
     hasDraft_[0] = hasDraft_[1] = true;
     drop(p1sel, p0bans);
     drop(p0sel, p1bans);
+    deferBuild_ = true;  // 眼前构筑由下方 decide_both 双方同时结算
     setup_player(P0, p0sel);
     setup_player(P1, p1sel);
+    deferBuild_ = false;
+    // 眼前构筑（双方同时）：常规牌并行 → 切札并行 → 收尾（固定 P0→P1，RNG 消耗顺序不变）。
+    auto [bnl0, bnl1] = decide_both(build_request(P0, buildNormals_[P0], 7, "眼前构筑：常规牌（选 7 张）"),
+                                    build_request(P1, buildNormals_[P1], 7, "眼前构筑：常规牌（选 7 张）"));
+    build_apply(buildNormals_[P0], 7, bnl0);
+    build_apply(buildNormals_[P1], 7, bnl1);
+    auto [bsp0, bsp1] = decide_both(build_request(P0, buildSpecials_[P0], 3, "眼前构筑：切札（选 3 张）"),
+                                    build_request(P1, buildSpecials_[P1], 3, "眼前构筑：切札（选 3 张）"));
+    build_apply(buildSpecials_[P0], 3, bsp0);
+    build_apply(buildSpecials_[P1], 3, bsp1);
+    build_finish(P0);
+    build_finish(P1);
     Player first = st.rng.below(2) == 0 ? P0 : P1;
     st.active = first;
     ps(first).vigor = 0;
@@ -380,7 +438,7 @@ void Engine::setup_match() {
   Request r0, r1;
   auto build_mul = [&](Player p, Request& r) {
     r.kind = "mulligan";
-    r.prompt = "choose any cards to put on the bottom of your deck";
+    r.prompt = "换牌：选择要放回牌山底的手牌（可不选）";
     for (int inst : ps(p).hand) {
       Option o;
       o.label = card_label(def_of(inst));
@@ -394,8 +452,7 @@ void Engine::setup_match() {
   };
   build_mul(P0, r0);
   build_mul(P1, r1);
-  Decision d0 = decide(P0, r0);
-  Decision d1 = decide(P1, r1);
+  auto [d0, d1] = decide_both(std::move(r0), std::move(r1));  // 换牌：双方同时
 
   auto apply_mul = [&](Player p, const Decision& d) {
     std::vector<int> chosen;

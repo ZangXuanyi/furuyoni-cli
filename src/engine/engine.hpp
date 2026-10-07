@@ -53,6 +53,8 @@ enum MechanicBit : uint32_t {
 };
 // 女神 id → 机制位（形态无关；返回 0 = 无专属机制）。
 uint32_t mechanic_bits(const std::string& goddess);
+// 基本动作的中文名（选项标签用）。
+const char* basic_cn(BasicAction a);
 
 // A cross-goddess deck-building ban (village rule / official restriction):
 // when a player picked both goddesses a and b, the card named `card` cannot be
@@ -179,6 +181,10 @@ class Engine {
   nlohmann::json observation(Player viewer) const;
 
   Decision decide(Player p, Request req);
+  // 并行询问双方（三拾/一舍/眼前构筑/换牌这类互不依赖的请求）：线程只做
+  // 智能体 IO；观察/帧/日志/非法计数等簿记按 P0→P1 固定顺序串行，回放确定性
+  // 不受线程完成顺序影响。共享智能体或回放时退化为顺序询问。
+  std::pair<Decision, Decision> decide_both(Request ra, Request rb);
 
   // ---- decision validation -------------------------------------------------
   // Agents are untrusted: every decision is validated before use. Illegal
@@ -871,6 +877,8 @@ class Engine {
 
   // Untrusted-decision handling (see decide()).
   Decision sanitize_decision(Player p, const Request& req, Decision d);
+  int push_trace_frame(Player p, const Request& req);
+  Decision finalize_decision(Player p, const Request& req, Decision d, int traceFrame);
   void count_illegal(Player p, const std::string& why);
 
   int illegalCount_[2] = {0, 0};
@@ -888,6 +896,17 @@ class Engine {
 
   // A "pick" is a (goddess, form) pair; form is "O" / "A1" / "A2".
   void setup_player(Player p, const std::vector<std::pair<std::string, std::string>>& picks);
+  // 眼前构筑的三段式拆分（并行询问用）：请求构建 / 决策应用 / 收尾。
+  Request build_request(Player p, std::vector<int>& pool, int want, const char* what);
+  void build_apply(std::vector<int>& pool, int want, const Decision& d);
+  void build_finish(Player p);
+  // 三拾/一舍的请求构建与决策解析（并行询问用）。
+  Request draft_pick_request(std::vector<std::pair<std::string, std::string>>& opts, Player p);
+  std::vector<std::pair<std::string, std::string>> draft_pick_parse(
+      const std::vector<std::pair<std::string, std::string>>& opts, const Decision& d);
+  Request draft_ban_request(const std::vector<std::pair<std::string, std::string>>& opp, Player p);
+  bool deferBuild_ = false;  // setup_player 只暂存构筑池，由 setup_match 并行结算
+  std::vector<int> buildNormals_[2], buildSpecials_[2];
   void init_barracks(Player p, const std::vector<std::pair<std::string, std::string>>& picks);  std::vector<std::pair<std::string, std::string>> draft_pick(Player p);
   std::pair<std::string, std::string> draft_ban(
       Player p, const std::vector<std::pair<std::string, std::string>>& opp);

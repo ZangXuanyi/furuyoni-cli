@@ -31,8 +31,16 @@ echo "[match] p1 邮箱: $P1DIR   (把该目录交给座位 1 的 Agent)"
     --record "$OUT/game.json" --web "$OUT/replay.html" \
     "$@" 2>&1 | tee "$OUT/engine.log"
 
+# 决出胜负后：把结果写进双方座位目录（Agent 侧也能看到）。
+RESULT=$(grep -E "Player[01].*胜|draw" "$OUT/engine.log" | tail -1)
+for SD in "$P0DIR" "$P1DIR"; do
+  printf '# 对局结果\n\n%s\n\n(完整复盘: %s/replay.html)\n' \
+    "${RESULT:-（未见结果行，见 engine.log）}" "$OUT" > "$SD/result.md"
+done
+
 echo
 echo "[match] 完成。产物:"
 echo "  WebUI 回放: $OUT/replay.html"
 echo "  决策日志:   $OUT/game.json"
 echo "  座位转录:   $P0DIR/transcript.md / $P1DIR/transcript.md"
+echo "  结果提示:   $P0DIR/result.md / $P1DIR/result.md（含 GAME-OVER.md）"

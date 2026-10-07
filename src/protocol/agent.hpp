@@ -27,6 +27,8 @@ struct Request {
   int minSel = 1;
   int maxSel = 1;
   nlohmann::json state;
+  // 结构化请求信息（可选）：如对应窗口携带被对应攻击的摘要（见 agent-protocol.md）。
+  nlohmann::json data;
 };
 
 struct Decision {
