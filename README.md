@@ -196,6 +196,17 @@ Phase 3 新增字段与 API：
 
 数据来自引擎的 `full_state_json()`（含隐藏信息，仅用于赛后回看）与 `trace_json()`；`--trace` 可导出该 JSON 供其它工具使用。注意三拾一舍强制**各柱女神不重复**（不会出现同一女神的两个变格）。
 
+## 4.6 重构中的破坏性变更（2026-10，按 what.md）
+
+重构允许一切破坏性变更；下表是已落地的部分（旧 replay/状态哈希一律失效）：
+
+| 变更 | 说明 |
+|---|---|
+| **付与结算顺序** | 打出付与：种植 → 给献（纳支付）→ **展开时** → 0 献弃置。展开时在献落位后触发、可读最终献数；旧序「展开时→放献」废止（裁定修订，见 rulings #4） |
+| **Lua 钩子 `on_expand`** | `on_enter` 与 `on_expanded` 合并为单一钩子 `on_expand`（26 个内容模块已全部迁移） |
+| **状态哈希算法** | `state_hash` 摘要内容随内部重构变化（伤害路由全局已参数化为 `DamageRoute`、机制能力位 `mech` 入摘要等）；旧 replay 文件不可回放 |
+| **内部架构** | `src/engine/tokens.cpp`（结晶/异樱唯一移动入口 `token_move`/`token_adjust`）、`src/engine/pipeline.cpp`（命名阶段的结算管线 + `PlayFrame` 结算栈帧）、`src/engine/mechanics/`（女神机制各归其源文件：steam/ice/wound/market 已迁入，其余按同模式迁移中）、`src/engine/effect_ctx.hpp`（Lua 绑定共享层） |
+
 ## 5. 规则裁定
 
 所有语义裁定（早期编号 1~109 与 2026-10 新裁定）集中在 **[`docs/rulings.md`](docs/rulings.md)**，

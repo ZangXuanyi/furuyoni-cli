@@ -80,3 +80,32 @@ Phase 5 时本文件内容并入 rulings.md，届时删除本文件。
 - 注意：对照时各引擎二进制必须在**各自源码树目录**下运行——`content/` 按 cwd 解析，
   混用目录会产生「引擎找 on_enter、内容已改名 on_expand」的怪胎构建（排查时踩过）。
 - rulings #4 已按新裁定修订（种植 → 放献 → 展开时 → 0 献弃置）。
+
+## Phase 3 进度（机制拆分）与剩余工作清单
+
+已落地（每步 213/213 用例 + 模糊全绿后提交）：
+
+- 基础设施：`engine/effect_ctx.hpp`（LuaCtx/LuaAttack/LuaCost/LuaEvent + 共享解析），
+  `EffectHost` 构造后统一调用 `run_mechanic_ctx_blocks`（mechanics/blocks.cpp 汇总）。
+- 能力注册表：`MechanicBit`/`mechanic_bits()`/`PlayerState.mech`（抽将与固定牌组两条
+  setup 路径都置位），`has_misora/has_shisui/has_akina/has_innealra` 改查能力位。
+- Wave 1：mechanics/steam.cpp（11）、ice.cpp（15）、wound.cpp（24）。
+- Wave 2：mechanics/market.cpp（23）。
+
+剩余（按 Wave 1/2 模式继续，纯代码搬移 + blocks.cpp 注册一行 + CMake 一行）：
+
+1. mechanics/soil.cpp（19 种子/植株/假想树，engine.cpp 土壤段 + ctx 块 ~300 行）
+2. mechanics/fate.cpp（26 命运槽/惑/共鸣，engine.cpp 2675-2801 段 + Innealra ctx 块）
+3. mechanics/drama.cpp（20 地图/戏剧，engine.cpp 3085-3451 段 + ctx 块；顺手把节点表
+   与六个戏剧条件改为数据表）
+4. mechanics/curse.cpp（21）、dive.cpp（17）、barracks.cpp（18）、poison.cpp（09）、
+   keiryo.cpp（07）、slots.cpp（12 风雷）、parts.cpp（05）、memory.cpp（16 镜映/回忆）
+5. PlayerState/CardDef 重组为通用字段 + 每机制子结构；state_hash/observation/
+   full_state_json 改为按机制注册的结构化 visitor（消灭四处手同步）
+6. card_names.hpp 消解：引擎侧 `has_named_active` 检查逐个改为 CardDef 能力位
+   （由 Lua 数据声明），仅保留测试用名字清单
+7. Phase 4（Lua API v2）：self_boost/choose_move/responded_is_plain/span 工具上收，
+  删除 set_vigor/set_flare 等裸写入器，ctx 分层（查询/决策/行动），26 模块迁移
+
+验证方法备忘：新旧引擎对照必须**在各源码树目录下运行**（content 按 cwd 解析）；
+hajimari 语料应 30/30 帧一致，standard 语料分歧应全部起于付与结算（Phase 2 审计表）。
