@@ -1122,64 +1122,6 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     c.e->free_basics_of(static_cast<Player>(p), maxTimes, names);
   };
 
-  // ---- 19-Megumi 泷河希: 耕种 / 土壤 / 假想树 ------------------------------
-  ctx["has_soil"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).hasSoil; };
-  ctx["seeds"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).soilSeeds; };
-  ctx["plants"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).soilPlants; };
-  ctx["green"] = [](LuaCtx& c, int inst) { return c.e->green_of(inst); };
-  ctx["card_crystal_count"] = [](LuaCtx& c, int inst) { return c.e->card_crystal_count(inst); };
-  ctx["total_green_on_enhances"] = [](LuaCtx& c, int p) {
-    return c.e->total_green_on_enhances(static_cast<Player>(p));
-  };
-  ctx["green_zones"] = [](LuaCtx& c, int p) { return c.e->green_zones(static_cast<Player>(p)); };
-  ctx["green_total"] = [](LuaCtx& c, int p) { return c.e->green_total(static_cast<Player>(p)); };
-  ctx["seed_to_plant"] = [](LuaCtx& c, int p, int n) {
-    c.e->seed_to_plant(static_cast<Player>(p), n);
-  };
-  ctx["attach_green"] = [](LuaCtx& c, int inst, int n) { return c.e->attach_green(inst, n); };
-  ctx["detach_green"] = [](LuaCtx& c, int inst, int n) {
-    return c.e->detach_green_to_seeds(inst, n);
-  };
-  ctx["remove_card_crystals"] = [](LuaCtx& c, int inst, int n) {
-    c.e->set_crystal_mover(c.who);
-    int got = c.e->remove_card_crystals(inst, n);
-    c.e->clear_crystal_mover();
-    return got;
-  };
-  ctx["tree_active"] = [](LuaCtx& c, int p) { return c.e->tree_active(static_cast<Player>(p)); };
-  ctx["tree_enter"] = [](LuaCtx& c, int p) {
-    c.e->ps(static_cast<Player>(p)).treeActive = true;
-  };
-  ctx["enhance_active"] = [](LuaCtx& c, int inst) { return c.e->enhance_active(inst); };
-  ctx["tree_slot"] = [](LuaCtx& c, int p, int i) {
-    return c.e->tree_slot(static_cast<Player>(p), i);
-  };
-  ctx["tree_occupied"] = [](LuaCtx& c, int p) {
-    return c.e->tree_occupied(static_cast<Player>(p));
-  };
-  ctx["tree_place"] = [](LuaCtx& c, int p) {
-    return c.e->tree_place_from_soil(static_cast<Player>(p));
-  };
-  ctx["tree_fall"] = [](LuaCtx& c, int p, int n) {
-    c.e->tree_fall(static_cast<Player>(p), n);
-  };
-  ctx["set_next_growth"] = [](LuaCtx& c, int p, int x) {
-    c.e->set_next_growth(static_cast<Player>(p), x);
-  };
-  ctx["growth_of"] = [](LuaCtx& c, int inst) {
-    return c.e->growth_of(static_cast<Player>(c.who), inst);
-  };
-  ctx["used_generated_attack"] = [](LuaCtx& c, int p) {
-    return c.e->used_generated_attack(static_cast<Player>(p));
-  };
-  ctx["is_borrowed"] = [](LuaCtx& c, int inst) { return c.e->is_borrowed(inst); };
-  ctx["card_owner"] = [](LuaCtx& c, int inst) { return c.e->card_owner(inst); };
-  ctx["unchosen_cuts"] = [](LuaCtx& c, int p) {
-    return c.e->unchosen_cuts(static_cast<Player>(p));
-  };
-  ctx["tree_use_cut"] = [](LuaCtx& c, int inst) {
-    c.e->tree_use_cut(static_cast<Player>(c.who), inst);
-  };
   // ---- 20-Kanawe 叶慧: 地图 / 戏剧 ------------------------------------------
   // 当前所在地的剧目数值 / 颜色（"red"/"purple"/"green"/"yellow"/"none"）。
   ctx["node_value"] = [](LuaCtx& c) { return c.e->node_value(c.who); };
