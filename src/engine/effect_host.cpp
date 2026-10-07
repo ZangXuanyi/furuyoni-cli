@@ -390,6 +390,14 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["to_deck_bottom"] = [](LuaCtx& c, int inst) { c.e->move_card_bottom(inst); };
   ctx["discard_card"] = [](LuaCtx& c, int inst) { c.e->move_card(inst, Zone::Discard); };
   ctx["reveal_hand"] = [](LuaCtx& c, int p) { c.e->reveal_hand(static_cast<Player>(p)); };
+  // 特化命名操作（what.md 第 1 条）：装伤 = 装结晶进虚（先耗"视作装"的牌上结晶）；
+  // 命伤 = 命结晶进自气（可触发破绽/即再起/死亡检查）。
+  ctx["aura_damage"] = [](LuaCtx& c, int p, int n) {
+    c.e->spend_aura(static_cast<Player>(p), n);
+  };
+  ctx["life_damage"] = [](LuaCtx& c, int p, int n) {
+    c.e->damage_life(static_cast<Player>(p), n, AreaKind::Flare, true);
+  };
 
   ctx["move"] = [](LuaCtx& c, std::string from, std::string to, int n, sol::optional<int> pf,
                    sol::optional<int> pt) -> int {

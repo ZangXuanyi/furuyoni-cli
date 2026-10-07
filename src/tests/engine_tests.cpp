@@ -5862,3 +5862,36 @@ TEST_CASE("付与顺序: 展开时可读最终献数（寄花）") {
   CHECK(crystals_total(e) == 36);
   for (const std::string& v : check_invariants(e)) CHECK_MESSAGE(false, v);
 }
+
+TEST_CASE("Lua 特化接口: ctx:aura_damage / ctx:life_damage 与引擎一致") {
+  Config cfg = make_cfg("hajimari", 1);
+  Engine e(cfg);
+  load_hajimari(e);
+  FirstAgent a;
+  e.set_agent(P0, &a);
+  e.set_agent(P1, &a);
+  // 经由一张 Lua 牌的 on_play 调用特化接口，验证与 C++ 路径等价。
+  const char* src =
+      "return {{set='t', form='O', num=1, name='T', kind='normal', type='action',\n"
+      "        on_play=function(ctx)\n"
+      "          ctx:aura_damage(ctx:opp(), 2)\n"
+      "          ctx:life_damage(ctx:opp(), 3)\n"
+      "        end}}";
+  FILE* f = std::fopen("/tmp/fy_test_api.lua", "w");
+  std::fputs(src, f);
+  std::fclose(f);
+  e.load_content("/tmp/fy_test_api.lua");
+  int def = find_def(e, "t", "T");
+  REQUIRE(def >= 0);
+  int inst = e.add_instance(def, P0);
+  e.move_card(inst, Zone::Hand);
+  e.st.active = P0;
+  const int aura0 = e.ps(P1).aura, dust0 = e.st.dust, life0 = e.ps(P1).life;
+  e.play_card(P0, inst, false);
+  CHECK(e.ps(P1).aura == aura0 - 2);      // 装伤 2: 装→虚
+  CHECK(e.st.dust == dust0 + 2);
+  CHECK(e.ps(P1).life == life0 - 3);      // 命伤 3: 命→自气
+  CHECK(e.ps(P1).flare == 3);
+  CHECK(crystals_total(e) == 36);
+  for (const std::string& v : check_invariants(e)) CHECK_MESSAGE(false, v);
+}
