@@ -374,35 +374,6 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["set_aim"] = [](LuaCtx& c, int p, int v) {
     c.e->set_aim(static_cast<Player>(p), v);
   };
-  // ---- 23-Akina 源上安琪娜: 资本 / 股市 / 股价 / 投资 / 套现 / 算法 -------------
-  ctx["market"] = [](LuaCtx& c, sol::optional<int> p) {
-    return c.e->ps(p ? static_cast<Player>(*p) : c.who).market;
-  };
-  ctx["stock"] = [](LuaCtx& c, sol::optional<int> p) {
-    return c.e->stock_price(p ? static_cast<Player>(*p) : c.who);
-  };
-  ctx["capital"] = [](LuaCtx& c, sol::optional<int> p) {
-    return c.e->capital(p ? static_cast<Player>(*p) : c.who);
-  };
-  // 套现一次（股市不足 1 个结晶时什么也不做）。返回是否执行。
-  ctx["cash_out"] = [](LuaCtx& c, sol::optional<int> p) -> bool {
-    const Player who = p ? static_cast<Player>(*p) : c.who;
-    if (!c.e->can_cash_out(who)) return false;
-    c.e->cash_out(who);
-    return true;
-  };
-  // 投资一次（没有可翻的投资券或对应区域不足时什么也不做）。返回是否执行。
-  ctx["invest"] = [](LuaCtx& c, sol::optional<int> p) -> bool {
-    return c.e->invest(p ? static_cast<Player>(*p) : c.who);
-  };
-  ctx["invest_available"] = [](LuaCtx& c, sol::optional<int> p) {
-    return c.e->invest_available(p ? static_cast<Player>(*p) : c.who);
-  };
-  // O-N5 算法: 本回合内所有攻击获得距离扩大（近1）与距离缩小（远1）。
-  ctx["set_algorithm"] = [](LuaCtx& c) { c.e->ps(c.who).algorithmThisTurn = true; };
-  ctx["algorithm"] = [](LuaCtx& c, sol::optional<int> p) {
-    return c.e->ps(p ? static_cast<Player>(*p) : c.who).algorithmThisTurn;
-  };
   // ---- 26-Innealra 诺伦: 惑 / 命运槽 / 共鸣 / 纠葛 --------------------------
   ctx["waku"] = [](LuaCtx& c, sol::optional<int> p) {
     return c.e->ps(p ? static_cast<Player>(*p) : c.who).waku;
