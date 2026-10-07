@@ -105,6 +105,11 @@ void Engine::setup_player(Player p, const std::vector<std::pair<std::string, std
     }
   }
   playerSets_[p] = setIds;
+  // 能力注册表：按所选女神置位机制位（取代运行期的 id 前缀匹配）。
+  for (const std::string& s : setIds) {
+    const size_t dot = s.find('.');
+    ps(p).mech |= mechanic_bits(dot == std::string::npos ? s : s.substr(0, dot));
+  }
   for (const std::string& s : setIds)
     if (s.rfind("kamuwi", 0) == 0) ps(p).hasCurse = true;  // 神居: 启用诅咒机制
   for (const auto& [g, f] : picks) {
@@ -183,92 +188,14 @@ void Engine::set_assembled(int inst, bool v) {
   if (ci(inst).zone == Zone::Parts) ci(inst).assembled = v;
 }
 
-void Engine::transform_choose(Player p) {
-  std::vector<int> cards = transform_cards(p);
-  if (cards.empty()) return;
-  Request r;
-  r.kind = "option";
-  r.prompt = "选择变形光环";
-  for (int inst : cards) r.options.push_back({def_of(inst).name, true, {}});
-  int c = ask_one(p, std::move(r));
-  c = std::min(c, static_cast<int>(cards.size()) - 1);
-  transform(p, def_of(cards[static_cast<size_t>(c)]).name);
-}
 
-void Engine::init_transforms(Player p, const std::string& form) {
-  // 变形 are numbered O-TR1..; a 变格 transform with the same slot replaces the O
-  // one (A1-TR1 紧那罗 -> O-TR1 夜叉), while unreplaced O transforms stay
-  // available (A1 keeps O-TR2 娜迦). Slot = num % 10 (801,802,803 / 811,813,814).
-  std::map<int, int> chosen;
-  for (const CardDef& d : defs)
-    if (d.isTransform && d.goddess == "thallya" && d.form == "O") chosen[d.local % 10] = d.id;
-  if (form != "O")
-    for (const CardDef& d : defs)
-      if (d.isTransform && d.goddess == "thallya" && d.form == form)
-        chosen[d.local % 10] = d.id;
-  for (const auto& [slot, id] : chosen) add_instance(id, p);  // Zone::Removed (追加区)
-}
 
-std::vector<int> Engine::transform_cards(Player p) const {
-  std::vector<int> out;
-  for (int i = 0; i < static_cast<int>(st.insts.size()); ++i)
-    if (st.insts[i].owner == p && st.insts[i].zone == Zone::Removed && def_of(i).isTransform)
-      out.push_back(i);
-  return out;
-}
 
-int Engine::active_transform_inst(Player p) const {
-  int d = ps(p).transformDef;
-  if (d < 0) return -1;
-  for (int i = 0; i < static_cast<int>(st.insts.size()); ++i)
-    if (st.insts[i].owner == p && st.insts[i].zone == Zone::Removed && st.insts[i].def == d)
-      return i;
-  return -1;
-}
 
-void Engine::transform(Player p, const std::string& name) {
-  for (const CardDef& d : defs)
-    if (d.isTransform && d.name == name) {
-      ps(p).transformDef = d.id;
-      ps(p).transformCount += 1;
-      if (effects_->has(d.id, "on_transform")) effects_->call(*this, d.id, "on_transform", p, -1);
-      fire("transformed", p, nullptr, -1, false);
-      return;
-    }
-}
 
-void Engine::reset_steam_at_turn_start(Player p) {
-  // 气动 steam lasts until the owner's own next turn: only that player's
-  // off-engine steam returns to the exhausted module.
-  ps(p).steamExhausted += ps(p).steamOnDist + ps(p).steamOnCrystal;
-  ps(p).steamOnDist = 0;
-  ps(p).steamOnCrystal = 0;
-  ashuraExtraUsed_[p] = false;
-}
 
-std::vector<int> Engine::active_transform_defs(Player p) const {
-  std::vector<int> out;
-  auto add = [&](int def) {
-    if (def < 0) return;
-    if (std::find(out.begin(), out.end(), def) == out.end()) out.push_back(def);
-  };
-  add(ps(p).transformDef);
-  for (int inst : ps(p).enhance)
-    if (def_of(inst).name == cards::kSokaiKaisou) add(sealed_card(inst) >= 0 ? ci(sealed_card(inst)).def : -1);
-  return out;
-}
 
-bool Engine::can_burn(Player p, int x) const {
-  // 燃烧X needs X counters that can actually move. Under 萨利亚的杰作 the source
-  // is the exhausted module and a partial recovery is not allowed, so a burn card
-  // can only be played when the full amount can be recovered.
-  if (has_named_active(p, cards::kSariaNoKessaku)) return ps(p).steamExhausted >= x;
-  return ps(p).steamEngine >= x;
-}
 
-bool Engine::transform_is(Player p, const std::string& name) const {
-  return ps(p).transformDef >= 0 && def(ps(p).transformDef).name == name;
-}
 
 void Engine::add_unused_cuts(Player p) {
   std::vector<int> list;
@@ -309,8 +236,33 @@ void Engine::assemble_part(Player p, int inst) {
   }
 }
 
+// 女神 id → 机制位（what.md 第 2 条：能力注册表，取代运行期字符串前缀匹配）。
+uint32_t mechanic_bits(const std::string& goddess) {
+  if (goddess == "kamuwi") return MC_Curse;
+  if (goddess == "oboro") return MC_Parts;
+  if (goddess == "yukihi") return MC_Weapon;
+  if (goddess == "chikage") return MC_Bag;
+  if (goddess == "thallya") return MC_Steam;
+  if (goddess == "raira") return MC_Slots;
+  if (goddess == "megumi") return MC_Soil;
+  if (goddess == "kanawe") return MC_Drama;
+  if (goddess == "hatsumi") return MC_Dive;
+  if (goddess == "mizuki") return MC_Barracks;
+  if (goddess == "konuru") return MC_Ice;
+  if (goddess == "shisui") return MC_Wound;
+  if (goddess == "akina") return MC_Market;
+  if (goddess == "misora") return MC_Aim;
+  if (goddess == "innealra") return MC_Fate;
+  return 0;
+}
+
 void Engine::setup_player_sets(Player p, const std::vector<std::string>& sets) {
   playerSets_[p] = sets;
+  // 能力注册表：固定牌组路径同样按女神置位机制位。
+  for (const std::string& s : sets) {
+    const size_t dot = s.find('.');
+    ps(p).mech |= mechanic_bits(dot == std::string::npos ? s : s.substr(0, dot));
+  }
   for (const std::string& s : sets) {  // 19-Megumi: 土壤机制（固定牌组模式）
     if (s == "megumi" || s.rfind("megumi.", 0) == 0) init_soil(p);
     if (s == "kanawe" || s.rfind("kanawe.", 0) == 0) init_dramas(p);  // 20-Kanawe

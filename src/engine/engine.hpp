@@ -32,6 +32,28 @@ inline constexpr uint32_t AF_AuraToDistance = 1u << 14;
 // 移到攻击者的「惑」。
 inline constexpr uint32_t AF_ToWaku = 1u << 15;
 
+// 机制能力注册表（what.md 第 2 条）：女神 → 机制位。取代运行期的女神 id 前缀
+// 字符串匹配；setup 时按所选女神置位（engine_setup.cpp::mechanic_bits）。
+enum MechanicBit : uint32_t {
+  MC_Curse = 1u << 0,     // 21-Kamuwi 诅咒/禁忌
+  MC_Parts = 1u << 1,     // 05-Oboro 零件（A2 电子设置）
+  MC_Weapon = 1u << 2,    // 06-Yukihi 变貌（伞/簪）
+  MC_Bag = 1u << 3,       // 09-Chikage 毒袋
+  MC_Steam = 1u << 4,     // 11-Thallya 蒸汽引擎/变形
+  MC_Slots = 1u << 5,     // 12-Raira 风雷槽
+  MC_Soil = 1u << 6,      // 19-Megumi 土壤/假想树
+  MC_Drama = 1u << 7,     // 20-Kanawe 地图/戏剧
+  MC_Dive = 1u << 8,      // 17-Hatsumi 航海/潜水
+  MC_Barracks = 1u << 9,  // 18-Mizuki 兵舍
+  MC_Ice = 1u << 10,      // 15-Konuru 冰晶
+  MC_Wound = 1u << 11,    // 24-Shisui 裂伤
+  MC_Market = 1u << 12,   // 23-Akina 股市/资本
+  MC_Aim = 1u << 13,      // 25-Misora 瞄准点
+  MC_Fate = 1u << 14,     // 26-Innealra 命运槽/惑
+};
+// 女神 id → 机制位（形态无关；返回 0 = 无专属机制）。
+uint32_t mechanic_bits(const std::string& goddess);
+
 // A cross-goddess deck-building ban (village rule / official restriction):
 // when a player picked both goddesses a and b, the card named `card` cannot be
 // included in their build.
@@ -702,6 +724,8 @@ class Engine {
   std::vector<int> transform_cards(Player p) const;
   int active_transform_inst(Player p) const;  // instance of the current 变形 aura
 
+  // 机制能力查询（见 MechanicBit；取代女神 id 前缀匹配）。
+  bool has_mech(Player p, uint32_t bit) const { return (ps(p).mech & bit) != 0; }
   // ---- tracing / replay viewer --------------------------------------------
   // 结算栈帧：一张正在结算的牌（含其结算语境的快照）。
   // def/owner/fromCover 用于渲染与 state_hash；ctx* 是压栈时刻的结算语境快照，

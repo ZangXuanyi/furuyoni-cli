@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -137,6 +138,7 @@ struct CardInstance {
 };
 
 struct PlayerState {
+  uint32_t mech = 0;  // 机制能力位（engine.hpp 的 MechanicBit；setup 时置位）
   int life = 10;
   int aura = 3;
   int flare = 0;

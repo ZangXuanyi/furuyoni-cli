@@ -1133,15 +1133,6 @@ void Engine::fire_armor_full_if_new(Player p, int cause) {
   if (armor_full(p)) fire("armor_full", p, nullptr, cause, false);
 }
 
-int Engine::freeze(Player p, int n, int cause) {
-  MoveReq m;
-  m.from = AreaRef::external();
-  m.to = AreaRef::aura(p);
-  m.fromKind = m.toKind = Token::Ice;
-  m.n = n;
-  m.cause = cause;
-  return token_move(m);
-}
 
 int Engine::mirror(Player p) const {
   const PlayerState& a = ps(p);
@@ -2338,19 +2329,11 @@ int Engine::distance() const {
   return d < 0 ? 0 : d;
 }
 
-bool Engine::has_misora(Player p) const {
-  for (const std::string& s : playerSets_[p])
-    if (s.rfind("misora", 0) == 0) return true;
-  return false;
-}
+bool Engine::has_misora(Player p) const { return has_mech(p, MC_Aim); }
 
 // ---- 24-Shisui 桑畑志水 -----------------------------------------------------
 
-bool Engine::has_shisui(Player p) const {
-  for (const std::string& s : playerSets_[p])
-    if (s.rfind("shisui", 0) == 0) return true;
-  return false;
-}
+bool Engine::has_shisui(Player p) const { return has_mech(p, MC_Wound); }
 
 bool Engine::no_death(Player p) const {
   for (int inst : ps(p).enhance)
@@ -2381,11 +2364,7 @@ bool Engine::attack_range_ok(const Attack& a) const {
 // 23-Akina 源上安琪娜: 资本 / 股价 / 投资 / 套现 / 算法 / 死亡窗口
 // ---------------------------------------------------------------------------
 
-bool Engine::has_akina(Player p) const {
-  for (const std::string& s : playerSets_[p])
-    if (s.rfind("akina", 0) == 0) return true;
-  return false;
-}
+bool Engine::has_akina(Player p) const { return has_mech(p, MC_Market); }
 
 int Engine::capital(Player p) const {
   // 资本 = 该玩家的装 + 气 + 股市结晶数；不控制安琪娜的玩家其股市视作 0。
@@ -2573,11 +2552,7 @@ bool Engine::run_death_saves(Player p) {
 // 26-Innealra 诺伦: 三把枪 / 命运槽 / 共鸣 / 纠葛 / 惑
 // ---------------------------------------------------------------------------
 
-bool Engine::has_innealra(Player p) const {
-  for (const std::string& s : playerSets_[p])
-    if (s.rfind("innealra", 0) == 0) return true;
-  return false;
-}
+bool Engine::has_innealra(Player p) const { return has_mech(p, MC_Fate); }
 
 bool Engine::form_matches(const CardDef& d, const std::string& f) const {
   if (d.form == f) return true;
@@ -2619,6 +2594,7 @@ void Engine::rotate_fates(Player p) {
 }
 
 int Engine::resonance_time_slot(Player p) const {
+  // 形态相关配置（O→0 / A1→1 / A2→2），非运行期女神探测。
   for (const std::string& s : playerSets_[p]) {
     if (s.rfind("innealra", 0) != 0) continue;
     if (s == "innealra.A1") return 1;
@@ -2915,41 +2891,8 @@ bool Engine::guess_name(Player guesser, int cardInst) {
   return correct;
 }
 
-void Engine::burn(Player p, int x) {
-  if (x <= 0) return;
-  MoveReq m;
-  m.from = AreaRef::steam_engine(p);
-  m.to = AreaRef::steam_exhausted(p);
-  m.fromKind = m.toKind = Token::Steam;
-  m.n = x;
-  token_move(m);  // 萨利亚的杰作重定向在 token_move 的蒸汽分支内
-}
 
-void Engine::recover(Player p, int x) {
-  MoveReq m;
-  m.from = AreaRef::steam_exhausted(p);
-  m.to = AreaRef::steam_engine(p);
-  m.fromKind = m.toKind = Token::Steam;
-  m.n = x;
-  token_move(m);
-}
 
-void Engine::pneumatic(Player p) {
-  if (ps(p).steamEngine < 1) return;
-  Request r;
-  r.kind = "option";
-  r.prompt = "气动：距离 +1 或 -1？";
-  r.options.push_back({"距离 +1", true, {}});
-  r.options.push_back({"距离 -1", true, {}});
-  int c = ask_one(p, std::move(r));
-  MoveReq m;
-  m.from = AreaRef::steam_engine(p);
-  // 「距离 -1」→ 放在距的结晶上（每枚 -1）；「距离 +1」→ 放在距上（每枚 +1）。
-  m.to = c == 1 ? AreaRef{AreaKind::SteamOnCrystal, p, -1} : AreaRef{AreaKind::SteamOnDist, p, -1};
-  m.fromKind = m.toKind = Token::Steam;
-  m.n = 1;
-  token_move(m);  // 距上蒸汽的 distance_changed/pneumatic 事件在蒸汽分支内
-}
 
 bool Engine::raira_can(Player p, const std::string& kind, int tier) const {
   return (kind == "wind" ? ps(p).wind : ps(p).thunder) >= tier;

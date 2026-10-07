@@ -21,6 +21,10 @@ add_library(furuyoni
   src/engine/engine_setup.cpp
   src/engine/tokens.cpp
   src/engine/pipeline.cpp
+  src/engine/mechanics/blocks.cpp
+  src/engine/mechanics/steam.cpp
+  src/engine/mechanics/ice.cpp
+  src/engine/mechanics/wound.cpp
   src/engine/effect_host.cpp
   src/protocol/agent.cpp
 )

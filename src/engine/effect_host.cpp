@@ -1,4 +1,5 @@
 #include "engine/effect_host.hpp"
+#include "engine/effect_ctx.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -89,31 +90,6 @@ void static_attack(CardDef& d, sol::table at) {
 }
 
 }  // namespace
-
-struct LuaCtx {
-  Engine* e = nullptr;
-  Player who = P0;
-  int source = -1;
-};
-
-struct LuaAttack {
-  Attack* a = nullptr;
-  Engine* e = nullptr;
-};
-
-// A mutable cost value handed to `continuous` query="cost" auras.
-struct LuaCost {
-  int value = 0;
-};
-
-struct LuaEvent {
-  Engine* e = nullptr;
-  std::string type;
-  Player subject = P0;
-  Attack* atk = nullptr;
-  int card = -1;
-  bool first = false;
-};
 
 namespace {
 
@@ -219,33 +195,6 @@ std::optional<int> read_int(sol::object o, Engine& e, LuaCtx& c) {
   if (o.is<int>()) return o.as<int>();
   if (o.is<double>()) return static_cast<int>(o.as<double>());
   return std::nullopt;
-}
-
-AreaRef area_of(const std::string& s, Player p) {
-  if (s == "life") return AreaRef::life(p);
-  if (s == "aura") return AreaRef::aura(p);
-  if (s == "flare") return AreaRef::flare(p);
-  if (s == "distance") return AreaRef::distance();
-  if (s == "dust") return AreaRef::dust();
-  if (s == "market") return AreaRef::market(p);  // 23-Akina 股市
-  if (s == "waku") return AreaRef::waku(p);      // 26-Innealra 惑
-  return AreaRef::dust();
-}
-
-// 24-Shisui 裂伤指示物所在的区域（0=装 / 1=气 / 2=命；-1 = 非法）。
-int wound_area_of(const std::string& s) {
-  if (s == "aura") return kWoundAura;
-  if (s == "flare") return kWoundFlare;
-  if (s == "life") return kWoundLife;
-  return -1;
-}
-
-BasicAction parse_basic(const std::string& s) {
-  if (s == "retreat") return BasicAction::Retreat;
-  if (s == "aura") return BasicAction::Aura;
-  if (s == "flare") return BasicAction::Flare;
-  if (s == "escape") return BasicAction::Escape;
-  return BasicAction::Advance;
 }
 
 }  // namespace
@@ -425,39 +374,6 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["set_aim"] = [](LuaCtx& c, int p, int v) {
     c.e->set_aim(static_cast<Player>(p), v);
   };
-  // ---- 24-Shisui 桑畑志水: 裂伤 ---------------------------------------------
-  // 向 target 的 "aura"/"flare"/"life" 放置 n 个裂伤指示物（source 默认 c.who）。
-  ctx["wound"] = [](LuaCtx& c, int target, std::string area, int n, sol::optional<int> source) {
-    const int a = wound_area_of(area);
-    if (a < 0) return;
-    const Player src = source ? static_cast<Player>(*source) : c.who;
-    c.e->add_wound(static_cast<Player>(target), a, n, src);
-  };
-  // 该区域中由 source（省略 = 双方合计）造成的裂伤数。
-  ctx["wound_count"] = [](LuaCtx& c, int target, std::string area, sol::optional<int> source) {
-    const int a = wound_area_of(area);
-    if (a < 0) return 0;
-    return c.e->wound_count(static_cast<Player>(target), a, source ? *source : -1);
-  };
-  // 把双方场上所有裂伤指示物伤害化（owner 决定自己那些裂伤的结算顺序）。
-  ctx["resolve_wounds"] = [](LuaCtx& c, sol::optional<int> owner) {
-    c.e->resolve_all_wounds(owner ? static_cast<Player>(*owner) : c.who);
-  };
-  // 只把 target 的某个区域内的裂伤指示物伤害化（O-S1）。
-  ctx["resolve_wound"] = [](LuaCtx& c, int target, std::string area) {
-    const int a = wound_area_of(area);
-    if (a < 0) return;
-    c.e->resolve_wound_area(static_cast<Player>(target), a);
-  };
-  // 攻击裂伤化: 该攻击的 X/Y 伤害变为 {X/Y} 裂伤（O-S3）。
-  ctx["wound_attack"] = [](LuaCtx& c, LuaAttack& atk) {
-    (void)c;
-    if (atk.a) atk.a->wound = true;
-  };
-  ctx["damage_taken_this_turn"] = [](LuaCtx& c, sol::optional<int> p) {
-    return c.e->damage_taken_this_turn(p ? static_cast<Player>(*p) : c.who);
-  };
-  ctx["no_death"] = [](LuaCtx& c, int p) { return c.e->no_death(static_cast<Player>(p)); };
   // ---- 23-Akina 源上安琪娜: 资本 / 股市 / 股价 / 投资 / 套现 / 算法 -------------
   ctx["market"] = [](LuaCtx& c, sol::optional<int> p) {
     return c.e->ps(p ? static_cast<Player>(*p) : c.who).market;
@@ -663,12 +579,6 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["redirect_damage_to_card"] = [](LuaCtx& c, int inst) {
     c.e->redirect_damage_to_card(inst);
   };
-  ctx["freeze"] = [](LuaCtx& c, int p, int n, sol::optional<int> cause) {
-    return c.e->freeze(static_cast<Player>(p), n, cause ? *cause : -1);
-  };
-  ctx["thaw"] = [](LuaCtx& c, int p, int n) { c.e->thaw(static_cast<Player>(p), n); };
-  ctx["ice"] = [](LuaCtx& c, int p) { return c.e->ice_count(static_cast<Player>(p)); };
-  ctx["frozen"] = [](LuaCtx& c, int p) { return c.e->frozen(static_cast<Player>(p)); };
   ctx["armor_full"] = [](LuaCtx& c, int p) { return c.e->armor_full(static_cast<Player>(p)); };
   ctx["aura_free"] = [](LuaCtx& c, int p) { return c.e->aura_free(static_cast<Player>(p)); };
   // 八叶: 镜映 = 你的装/气/命中与对手对应区域结晶数相同的区域数
@@ -1127,25 +1037,6 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["add_unused_cuts"] = [](LuaCtx& c, int p) {
     c.e->add_unused_cuts(static_cast<Player>(p));
   };
-  // Thallya
-  ctx["can_burn"] = [](LuaCtx& c, int p, int x) { return c.e->can_burn(static_cast<Player>(p), x); };
-  ctx["burn"] = [](LuaCtx& c, int p, sol::optional<int> x) {
-    c.e->burn(static_cast<Player>(p), x ? *x : 1);
-  };
-  ctx["recover"] = [](LuaCtx& c, int p, int x) { c.e->recover(static_cast<Player>(p), x); };
-  ctx["pneumatic"] = [](LuaCtx& c, int p) { c.e->pneumatic(static_cast<Player>(p)); };
-  ctx["transform"] = [](LuaCtx& c, int p, std::string n) {
-    c.e->transform(static_cast<Player>(p), n);
-  };
-  ctx["steam_engine"] = [](LuaCtx& c, int p) {
-    return c.e->ps(static_cast<Player>(p)).steamEngine;
-  };
-  ctx["steam_exhausted"] = [](LuaCtx& c, int p) {
-    return c.e->ps(static_cast<Player>(p)).steamExhausted;
-  };
-  ctx["transform_count"] = [](LuaCtx& c, int p) {
-    return c.e->ps(static_cast<Player>(p)).transformCount;
-  };
   ctx["raira_can"] = [](LuaCtx& c, std::string k, int t) { return c.e->raira_can(c.who, k, t); };
   ctx["raira_spend"] = [](LuaCtx& c, std::string k, int t) { return c.e->raira_spend(c.who, k, t); };
   ctx["raira_restrict"] = [](LuaCtx& c, int p) {
@@ -1179,19 +1070,6 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   };
   ctx["set_flare"] = [](LuaCtx& c, int p, int n) {
     c.e->ps(static_cast<Player>(p)).flare = n < 0 ? 0 : n;
-  };
-  ctx["transform_choose"] = [](LuaCtx& c, int p) { c.e->transform_choose(static_cast<Player>(p)); };
-  ctx["transform_cards"] = [](LuaCtx& c, int p) {
-    return c.e->transform_cards(static_cast<Player>(p));
-  };
-  ctx["set_next_draw_one"] = [](LuaCtx& c, int p) {
-    c.e->set_next_draw_one(static_cast<Player>(p));
-  };
-  ctx["current_transform"] = [](LuaCtx& c, int p, sol::this_state ts) -> sol::object {
-    Player pl = static_cast<Player>(p);
-    int td = c.e->ps(pl).transformDef;
-    if (td < 0) return sol::make_object(ts.L, sol::nil);
-    return sol::make_object(ts.L, c.e->def(td).name);
   };
   ctx["random_index"] = [](LuaCtx& c, int n) { return c.e->rng_below(n); };
   ctx["choose_options"] = [](LuaCtx& c, std::string prompt, sol::table opts, int mn, int mx) {
@@ -1430,6 +1308,10 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     if (!e.atk) return sol::make_object(ts.L, sol::nil);
     return sol::make_object(ts.L, LuaAttack{e.atk, e.e});
   };
+
+  // 机制模块（mechanics/*.cpp）注册的 ctx 方法块。
+  CtxTypes ctxTypes{ctx, atkutil};
+  run_mechanic_ctx_blocks(ctxTypes);
 }
 
 EffectHost::~EffectHost() = default;

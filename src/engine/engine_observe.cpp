@@ -270,6 +270,7 @@ uint64_t Engine::state_hash() const {
 
   for (int i = 0; i < 2; ++i) {
     const PlayerState& p = st.p[i];
+    put(p.mech);  // 机制能力位
     put(p.life); put(p.aura); put(p.ice); put(p.flare); put(p.vigor);
     putb(p.cower); putb(p.cannotRespond); put(p.lastLifeLost); put(p.cardsPlayedThisTurn);
     put(p.handLimit); put(p.cutCostDelta); putb(p.cannotAttack); putb(p.cannotBasic);
