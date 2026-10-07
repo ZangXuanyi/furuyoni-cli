@@ -1076,58 +1076,6 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     c.e->free_basics_of(static_cast<Player>(p), maxTimes, names);
   };
 
-  // ---- 20-Kanawe 叶慧: 地图 / 戏剧 ------------------------------------------
-  // 当前所在地的剧目数值 / 颜色（"red"/"purple"/"green"/"yellow"/"none"）。
-  ctx["node_value"] = [](LuaCtx& c) { return c.e->node_value(c.who); };
-  ctx["node_color"] = [](LuaCtx& c) -> std::string {
-    switch (c.e->node_color(c.who)) {
-      case 0: return "red";
-      case 1: return "purple";
-      case 2: return "green";
-      case 3: return "yellow";
-      default: return "none";
-    }
-  };
-  ctx["node_name"] = [](LuaCtx& c) { return c.e->node_name(c.who); };
-  // 准备下一幕戏剧；返回是否选择了已完成过的戏剧（疾书弗尽据此移出游戏）。
-  ctx["prepare_drama"] = [](LuaCtx& c, sol::optional<bool> allowCompleted) {
-    return c.e->prepare_drama(c.who, allowCompleted ? *allowCompleted : false);
-  };
-  ctx["drama_progressed_last_turn"] = [](LuaCtx& c, int p) {
-    return c.e->drama_progressed_last_turn(static_cast<Player>(p));
-  };
-  // 演出: 本回合不能完成戏剧。
-  ctx["set_no_drama"] = [](LuaCtx& c) { c.e->set_no_drama_this_turn(c.who); };
-  // 芳颜无常: 结算一次当前所在地的效果（红/紫/绿）。
-  ctx["resolve_node_reward"] = [](LuaCtx& c) { c.e->resolve_node_reward(c.who); };
-  // 即兴: 把一张手牌当作对应打出。
-  ctx["play_hand_card_as_response"] = [](LuaCtx& c, int inst) {
-    c.e->play_hand_card_response(c.who, inst);
-  };
-  // 知音难觅: 构筑时未获得的常规牌 / 切牌。
-  ctx["unchosen_normals"] = [](LuaCtx& c, int p, sol::this_state ts) -> sol::object {
-    std::vector<int> v = c.e->unchosen_normals(static_cast<Player>(p));
-    sol::table t = sol::table::create(ts.L);
-    for (size_t i = 0; i < v.size(); ++i) t[i + 1] = v[i];
-    return sol::make_object(ts.L, t);
-  };
-  ctx["unchosen_specials"] = [](LuaCtx& c, int p, sol::this_state ts) -> sol::object {
-    std::vector<int> v = c.e->unchosen_specials(static_cast<Player>(p));
-    sol::table t = sol::table::create(ts.L);
-    for (size_t i = 0; i < v.size(); ++i) t[i + 1] = v[i];
-    return sol::make_object(ts.L, t);
-  };
-  ctx["gain_unchosen_normal"] = [](LuaCtx& c, int inst) {
-    c.e->gain_unchosen_normal(c.who, inst);
-  };
-  ctx["gain_unchosen_cut"] = [](LuaCtx& c, int inst) { c.e->gain_unchosen_cut(inst); };
-  // 移出游戏（不同于「追加区」：不会被重新获得）。
-  ctx["remove_from_game"] = [](LuaCtx& c, int inst) { c.e->remove_from_game(inst); };
-  // 封杀: 宣言一个牌名（记录在本牌上），对手不能使用同名切牌。
-  ctx["declare_cut_ban"] = [](LuaCtx& c) { return c.e->declare_cut_ban(c.who, c.source); };
-  ctx["attacks_and_responses"] = [](LuaCtx& c) { return c.e->attacks_and_responses_this_turn(); };
-
-  // ---- 22-Renri 夜山恋离: 伪证 / 回归 / 铭镌之衣 / 洛阳铲 -------------------
   ctx["doubt_failed"] = [](LuaCtx& c, int p) {
     return c.e->ps(static_cast<Player>(p)).doubtFailedThisTurn;
   };
