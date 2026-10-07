@@ -59,7 +59,7 @@ void Engine::spend_aura(Player target, int n) {
   const std::vector<int> sp = ps(target).special;
   for (int inst : enh) drain(inst);
   for (int inst : sp) drain(inst);
-  if (remaining > 0) move_crystals(AreaRef::aura(target), AreaRef::dust(), remaining, false);
+  if (remaining > 0) move(AreaRef::aura(target), AreaRef::dust(), remaining, false);
 }
 
 void Engine::drop_enhance_if_empty(int inst) {
@@ -122,8 +122,8 @@ bool Engine::try_revive(Player p) {
   r.options.push_back({"使用（支付 " + std::to_string(cost) + " 气）", true, {}});
   r.options.push_back({"不使用", true, {}});
   if (ask_one(p, std::move(r)) != 0) return false;
-  move_crystals(AreaRef::flare(p), AreaRef::dust(), cost, false);
-  move_crystals(AreaRef::life(p), AreaRef::dust(), ps(p).life, false);  // all remaining life -> dust
+  move(AreaRef::flare(p), AreaRef::dust(), cost, false);
+  move(AreaRef::life(p), AreaRef::dust(), ps(p).life, false);  // all remaining life -> dust
   if (!ps(p).hand.empty()) {
     Request cr;
     cr.kind = "cards";
@@ -142,7 +142,7 @@ bool Engine::try_revive(Player p) {
     move_card(ci2, Zone::Cover);
     ci(ci2).faceUp = false;
   }
-  move_crystals(AreaRef::dust(), AreaRef::life(p), 1, false);
+  move(AreaRef::dust(), AreaRef::life(p), 1, false);
   ci(card).faceUp = true;
   ps(p).usedLastCrystal = true;
   return true;
@@ -160,7 +160,7 @@ void Engine::damage_life(Player p, int n, AreaKind to, bool triggerBreak, int to
     dest = AreaRef::distance();
   else if (to == AreaKind::Waku)
     dest = AreaRef::waku(toOwner >= 0 ? static_cast<Player>(toOwner) : p);  // 26-Innealra 惑
-  int moved = move_crystals(AreaRef::life(p), dest, n, false);
+  int moved = move(AreaRef::life(p), dest, n, false);
   ps(p).lastLifeLost = moved;
   if (moved > 0) on_life_loss(p, moved, triggerBreak);
   check_win();
@@ -337,14 +337,14 @@ void Engine::apply_damage_to(Player target, std::optional<int> aura, std::option
         int take = std::min(remaining, ci(inst).crystals);
         if (take <= 0) return;
         ci(inst).crystals -= take;
-        add_crystals(AreaRef::card(toCard), take);
+        adjust(AreaRef::card(toCard), take);
         remaining -= take;
         drop_enhance_if_empty(inst);
       };
       for (int inst : enh) drain(inst);
       for (int inst : sp) drain(inst);
       if (remaining > 0)
-        move_crystals(AreaRef::aura(target), AreaRef::card(toCard), remaining, false);
+        move(AreaRef::aura(target), AreaRef::card(toCard), remaining, false);
     } else if (toWaku) {
       // 视作装的卡上结晶优先耗尽（与 spend_aura 一致），但一律进入攻击者的惑。
       auraDamagedThisTurn_[target] = true;
@@ -357,7 +357,7 @@ void Engine::apply_damage_to(Player target, std::optional<int> aura, std::option
         int sak = 0;
         int got = take_card_crystals(inst, take, kTakeNormal, &sak);
         if (got <= 0) return;
-        if (sak > 0) add_crystals(AreaRef::waku(wakuOwner), sak);
+        if (sak > 0) adjust(AreaRef::waku(wakuOwner), sak);
         remaining -= got;
         drop_enhance_if_empty(inst);
       };
@@ -366,9 +366,9 @@ void Engine::apply_damage_to(Player target, std::optional<int> aura, std::option
       for (int inst : enh2) drain(inst);
       for (int inst : sp2) drain(inst);
       if (remaining > 0)
-        move_crystals(AreaRef::aura(target), AreaRef::waku(wakuOwner), remaining, false);
+        move(AreaRef::aura(target), AreaRef::waku(wakuOwner), remaining, false);
     } else if (route.toDistance || route.auraToDistance) {
-      move_crystals(AreaRef::aura(target), AreaRef::distance(), n, false);
+      move(AreaRef::aura(target), AreaRef::distance(), n, false);
     } else {
       spend_aura(target, n);
     }
@@ -441,7 +441,7 @@ void Engine::pay_special_cost(Player p, int inst) {
   }
   const int cost = cut_cost(p, d.id, inst);
   if (cost > 0) {
-    move_crystals(AreaRef::flare(p), AreaRef::dust(), cost, false);
+    move(AreaRef::flare(p), AreaRef::dust(), cost, false);
     store_int(inst, "paid_cost", cost);
   }
 }

@@ -50,13 +50,13 @@ void Engine::cash_out(Player p) {
   const int stock = ps(p).stockPrice;
   const Player o = opp(p);
   // 1) 股市中一片樱花结晶移到虚。
-  move_crystals(AreaRef::market(p), AreaRef::dust(), 1, false);
+  move(AreaRef::market(p), AreaRef::dust(), 1, false);
   // 2) 按股价把一片结晶移入自装（不足则尽量多，即 0 片）。
   switch (stock) {
-    case 1: move_crystals(AreaRef::dust(), AreaRef::aura(p), 1, false); break;
-    case 2: move_crystals(AreaRef::aura(o), AreaRef::aura(p), 1, false); break;
-    case 3: move_crystals(AreaRef::flare(o), AreaRef::aura(p), 1, false); break;
-    default: move_crystals(AreaRef::life(o), AreaRef::aura(p), 1, false); break;
+    case 1: move(AreaRef::dust(), AreaRef::aura(p), 1, false); break;
+    case 2: move(AreaRef::aura(o), AreaRef::aura(p), 1, false); break;
+    case 3: move(AreaRef::flare(o), AreaRef::aura(p), 1, false); break;
+    default: move(AreaRef::life(o), AreaRef::aura(p), 1, false); break;
   }
   // 3) 股价 -2。
   add_stock(p, -2);
@@ -103,7 +103,7 @@ bool Engine::invest(Player p) {
     reset_special(pick);  // 已使用 -> 未使用
 
   // 支付投资资金，然后股价 +1。
-  move_crystals(src, AreaRef::market(p), 1, false);
+  move(src, AreaRef::market(p), 1, false);
   add_stock(p, 1);
   check_win();  // 股价 4 时从自命支付可能使自命归零
   return true;
@@ -141,7 +141,7 @@ void Engine::akina_turn_start(Player p) {
   if (what == "cash")
     cash_out(p);
   else if (what == "sub")
-    move_crystals(AreaRef::aura(p), AreaRef::flare(p), 1, false);
+    move(AreaRef::aura(p), AreaRef::flare(p), 1, false);
 }
 
 void Engine::akina_end_of_turn(Player p) {

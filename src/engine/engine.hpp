@@ -207,12 +207,29 @@ class Engine {
   void move_card(int inst, Zone z);
   void move_card_top(int inst);      // put on top of owner's deck (next draw)
   void move_card_bottom(int inst);   // put on the bottom of owner's deck
-  int amount(AreaRef a) const;
-  void add_crystals(AreaRef a, int n);
+  // 旧入口：仅存量测试与外部兼容保留，请改用 token_amount/token_adjust/
+  // token_move（或上面的 move/adjust 快捷方式）。
+  [[deprecated("use token_amount (src/engine/tokens.cpp)")]] int amount(AreaRef a) const;
+  [[deprecated("use token_adjust / Engine::adjust")]] void add_crystals(AreaRef a, int n);
   // cardEffect==false for basic actions (迷烟 only negates card effects).
-  int move_crystals(AreaRef from, AreaRef to, int n, bool cardEffect = true);
+  [[deprecated("use token_move / Engine::move")]] int move_crystals(AreaRef from, AreaRef to,
+                                                                    int n, bool cardEffect = true);
+
+  // 公开手牌：无持续机械影响（观察是按观看者过滤拉取的）；保留给卡面文本
+  // 「公开手牌」调用（misora/tokoyo/innealra）。
+  void reveal_hand(Player p);
 
   // ---- 统一 Token 系统（what.md 第 1 条；实现见 src/engine/tokens.cpp）-------
+  // 内部快捷方式（机制模块/管线的推荐写法）：直连统一入口。
+  int move(const AreaRef& from, const AreaRef& to, int n, bool cardEffect = true) {
+    MoveReq m;
+    m.from = from;
+    m.to = to;
+    m.n = n;
+    m.cardEffect = cardEffect;
+    return token_move(m);
+  }
+  void adjust(const AreaRef& a, int n) { token_adjust(a, Token::Sakura, n); }
   // 区域内某类 token 的数量（Sakura 即原 amount）。
   int token_amount(const AreaRef& a, Token kind = Token::Sakura) const;
   // 无对端的增减：某区域直接 +/- n 个 token（含守恒审计与区域事件）。
@@ -301,7 +318,6 @@ class Engine {
   Attack make_attack(Player p, int inst, bool asResponse, bool consumePending,
                      bool declareNow = true);
   bool any_lock_distance() const;
-  void reveal_hand(Player p);
   // 25-Misora 追踪: a tracking attack is judged against the attacker's 瞄准点
   // (and cannot be declared at all without one). Otherwise == range.contains(distance()).
   bool attack_range_ok(const Attack& a) const;

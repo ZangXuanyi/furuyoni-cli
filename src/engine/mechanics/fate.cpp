@@ -124,7 +124,7 @@ bool Engine::suppress_attack_mods(Player attacker) const {
 int Engine::cost_to_waku(Player p, int inst) {
   const int n = cost_paid(inst);
   if (n <= 0) return 0;
-  const int moved = move_crystals(AreaRef::dust(), AreaRef::waku(p), n, false);
+  const int moved = move(AreaRef::dust(), AreaRef::waku(p), n, false);
   store_int(inst, "paid_cost", 0);
   return moved;
 }

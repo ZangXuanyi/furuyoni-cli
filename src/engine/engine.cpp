@@ -243,6 +243,10 @@ void Engine::move_card_bottom(int inst) {
   ps(c.holder).deck.insert(ps(c.holder).deck.begin(), inst);  // bottom == front
 }
 
+void Engine::reveal_hand(Player p) {
+  (void)p;  // 显式空操作：公开信息随观察接口按需可见，无状态变化。
+}
+
 int Engine::amount(AreaRef a) const {
   // 统一 Token 入口：樱花计数走 token_amount（土壤/蒸汽区无樱花，返回 0）。
   return token_amount(a, Token::Sakura);
@@ -323,10 +327,6 @@ bool Engine::respondable_card(Player p, int inst) {
   if (effects_->has_hook(d.id, "respond"))
     return effects_->eval_pred(*this, d.id, "respond", p, inst);
   return (d.flags & CF_Response) != 0;
-}
-
-void Engine::reveal_hand(Player p) {
-  (void)p;  // 仅当下公开一次；CLI 的观察是按需拉取的，无持续机械影响
 }
 
 void Engine::remove_card(int inst) { move_card(inst, Zone::Removed); }
@@ -844,8 +844,8 @@ bool Engine::do_basic(Player p, BasicAction a) {
   inBasicAction_ = true;
   basicActor_ = p;
   switch (a) {
-    case BasicAction::Advance: move_crystals(AreaRef::distance(), AreaRef::aura(p), 1, false); break;
-    case BasicAction::Retreat: move_crystals(AreaRef::aura(p), AreaRef::distance(), 1, false); break;
+    case BasicAction::Advance: move(AreaRef::distance(), AreaRef::aura(p), 1, false); break;
+    case BasicAction::Retreat: move(AreaRef::aura(p), AreaRef::distance(), 1, false); break;
     case BasicAction::Aura: {
       int host = absorb_aura_host(p);
       bool redirect = false;
@@ -858,9 +858,9 @@ bool Engine::do_basic(Player p, BasicAction a) {
         redirect = ask_one(p, std::move(r)) == 1;
       }
       if (redirect)
-        move_crystals(AreaRef::dust(), AreaRef::card(host), 1, false);
+        move(AreaRef::dust(), AreaRef::card(host), 1, false);
       else
-        move_crystals(AreaRef::dust(), AreaRef::aura(p), 1, false);
+        move(AreaRef::dust(), AreaRef::aura(p), 1, false);
       ps(p).suppressAuraRedirect = false;
       fire("basic_aura", p, nullptr, -1, false);  // 双掌生花: 检查是否恰好 5
       break;
@@ -869,9 +869,9 @@ bool Engine::do_basic(Player p, BasicAction a) {
       if (frozen(p))
         ps(p).ice -= 1;  // 被冻结时，聚气改为移除 1 个冰晶
       else
-        move_crystals(AreaRef::aura(p), AreaRef::flare(p), 1, false);
+        move(AreaRef::aura(p), AreaRef::flare(p), 1, false);
       break;
-    case BasicAction::Escape:  move_crystals(AreaRef::dust(), AreaRef::distance(), 1, false); break;
+    case BasicAction::Escape:  move(AreaRef::dust(), AreaRef::distance(), 1, false); break;
   }
   // Rule 19/94: a basic action performed by a card effect still counts as one.
   didBasicThisTurn_[p] = true;
@@ -1611,7 +1611,7 @@ int Engine::enhance_crystal_total(Player p) const {
 }
 
 int Engine::dust_to_card(int inst, int n) {
-  return move_crystals(AreaRef::dust(), AreaRef::card(inst), n, true);
+  return move(AreaRef::dust(), AreaRef::card(inst), n, true);
 }
 
 void Engine::set_used(int inst) {

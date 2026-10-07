@@ -68,11 +68,11 @@ int Engine::resolve_wound_group(Player target, int area, Player source) {
   switch (area) {
     case kWoundAura: {
       auraDamagedThisTurn_[target] = true;
-      moved = move_crystals(AreaRef::aura(target), AreaRef::dust(), n, false);
+      moved = move(AreaRef::aura(target), AreaRef::dust(), n, false);
       break;
     }
     case kWoundFlare:
-      moved = move_crystals(AreaRef::flare(target), AreaRef::dust(), n, false);
+      moved = move(AreaRef::flare(target), AreaRef::dust(), n, false);
       break;
     default: {  // kWoundLife: 命 → 气（按命伤处理：破绽 / 即再起 / 死亡检查）
       const int before = ps(target).life;

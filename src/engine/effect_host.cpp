@@ -413,7 +413,7 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
       }
     }
     c.e->set_crystal_mover(c.who);  // 22-Renri 终幕: 记录移动者
-    int moved = c.e->move_crystals(area_of(from, pFrom), area_of(to, pTo), n, true);
+    int moved = c.e->move(area_of(from, pFrom), area_of(to, pTo), n, true);
     c.e->clear_crystal_mover();
     return moved;
   };
@@ -766,14 +766,14 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["move_to_card"] = [](LuaCtx& c, std::string from, int inst, int n, sol::optional<int> pf) {
     Player p = pf ? static_cast<Player>(*pf) : c.who;
     c.e->set_crystal_mover(c.who);
-    int got = c.e->move_crystals(area_of(from, p), AreaRef::card(inst), n, true);
+    int got = c.e->move(area_of(from, p), AreaRef::card(inst), n, true);
     c.e->clear_crystal_mover();
     return got;
   };
   ctx["move_from_card"] = [](LuaCtx& c, int inst, std::string to, int n, sol::optional<int> pt) {
     Player p = pt ? static_cast<Player>(*pt) : c.who;
     c.e->set_crystal_mover(c.who);
-    int got = c.e->move_crystals(AreaRef::card(inst), area_of(to, p), n, true);
+    int got = c.e->move(AreaRef::card(inst), area_of(to, p), n, true);
     c.e->clear_crystal_mover();
     return got;
   };
@@ -928,7 +928,7 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["to_hand"] = [](LuaCtx& c, int inst) { c.e->move_card(inst, Zone::Hand); };
   ctx["add_crystal"] = [](LuaCtx& c, std::string area, int n, sol::optional<int> p) {
     Player pl = p ? static_cast<Player>(*p) : c.who;
-    c.e->add_crystals(area_of(area, pl), n);
+    c.e->adjust(area_of(area, pl), n);
   };
   ctx["gain_external"] = [](LuaCtx& c, std::string area, int n, sol::optional<int> p) {
     Player pl = p ? static_cast<Player>(*p) : c.who;
