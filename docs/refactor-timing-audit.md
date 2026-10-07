@@ -92,20 +92,22 @@ Phase 5 时本文件内容并入 rulings.md，届时删除本文件。
 - Wave 1：mechanics/steam.cpp（11）、ice.cpp（15）、wound.cpp（24）。
 - Wave 2：mechanics/market.cpp（23）。
 
-剩余（按 Wave 1/2 模式继续，纯代码搬移 + blocks.cpp 注册一行 + CMake 一行）：
+**2026-10-07 更新：第 1–4 项已全部完成**（16 个机制各归其源文件：steam/ice/
+wound/market/soil/fate/drama/dive/barracks/curse/poison/keiryo/slots/parts/
+memory + blocks 注册汇总；engine.cpp 3513→2165 行，effect_host.cpp 2011→1590 行）。
+弃用清理亦已完成：amount/add_crystals/move_crystals 标 [[deprecated]]，引擎内
+33 处调用迁移至 move()/adjust() 快捷方式与 token API；reveal_hand 确认为内容
+依赖的显式空操作后保留。新增女神指南见 docs/adding-goddess.md。
 
-1. mechanics/soil.cpp（19 种子/植株/假想树，engine.cpp 土壤段 + ctx 块 ~300 行）
-2. mechanics/fate.cpp（26 命运槽/惑/共鸣，engine.cpp 2675-2801 段 + Innealra ctx 块）
-3. mechanics/drama.cpp（20 地图/戏剧，engine.cpp 3085-3451 段 + ctx 块；顺手把节点表
-   与六个戏剧条件改为数据表）
-4. mechanics/curse.cpp（21）、dive.cpp（17）、barracks.cpp（18）、poison.cpp（09）、
-   keiryo.cpp（07）、slots.cpp（12 风雷）、parts.cpp（05）、memory.cpp（16 镜映/回忆）
+剩余：
+
 5. PlayerState/CardDef 重组为通用字段 + 每机制子结构；state_hash/observation/
    full_state_json 改为按机制注册的结构化 visitor（消灭四处手同步）
 6. card_names.hpp 消解：引擎侧 `has_named_active` 检查逐个改为 CardDef 能力位
-   （由 Lua 数据声明），仅保留测试用名字清单
+   （由 Lua 数据声明），仅保留测试用名字清单；drama 六条件数据化
 7. Phase 4（Lua API v2）：self_boost/choose_move/responded_is_plain/span 工具上收，
   删除 set_vigor/set_flare 等裸写入器，ctx 分层（查询/决策/行动），26 模块迁移
+   （ctx:aura_damage/ctx:life_damage 特化接口已就位）
 
 验证方法备忘：新旧引擎对照必须**在各源码树目录下运行**（content 按 cwd 解析）；
 hajimari 语料应 30/30 帧一致，standard 语料分歧应全部起于付与结算（Phase 2 审计表）。

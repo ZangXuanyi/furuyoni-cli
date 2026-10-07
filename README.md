@@ -115,6 +115,9 @@ content     每套卡组一个 Lua 模块（数据 + 行为）
 
 ## 4. 卡牌编写（Lua）
 
+> 新增女神/新卡的完整入门见 **[`docs/adding-goddess.md`](docs/adding-goddess.md)**
+> （模块结构、ctx 速查、常见坑、何时需要写 C++ 机制文件、测试方法）。
+
 每套卡组一个 Lua 模块，返回卡牌表。字段：
 
 | 字段 | 说明 |
