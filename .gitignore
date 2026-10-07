@@ -6,3 +6,6 @@
 compile_commands.json
 build-asan/
 build-*/
+.zcode/
+.zcodeignorematches/
+demo-replay*.html

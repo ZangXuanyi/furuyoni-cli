@@ -38,6 +38,7 @@ ctest --test-dir build --output-on-failure
 | 文档 | 内容 |
 |---|---|
 | [`docs/running.md`](docs/running.md) | 运行与评测：参数全集、规则包/预设、外部智能体接入 |
+| [`docs/ai-play.md`](docs/ai-play.md) | AI 亲自上场：文件邮箱桥、LLM 提示模板、一键开赛 |
 | [`docs/agent-protocol.md`](docs/agent-protocol.md) | 智能体协议：JSON-lines 请求/决策、观察信息面 |
 | [`docs/replay.md`](docs/replay.md) | 录制/回放/trace/WebUI 检视 |
 | [`docs/adding-goddess.md`](docs/adding-goddess.md) | 如何新增女神（Lua 卡面 + 何时写 C++ 机制） |
