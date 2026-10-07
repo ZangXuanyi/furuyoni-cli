@@ -112,14 +112,24 @@ triggers = { { event = "turn_start",     -- 34 个事件名见 effect_host.cpp::
                run = function(ctx, ev) ctx:draw(ctx:player(), 1) end } }
 ```
 
-**本牌攻击自增益**（决死/八相类条件词条的惯用形）：
+**本牌攻击自增益**：动态攻击值写在 `attack` 函数里（声明时求值并锁定）：
 ```lua
 attack = function(ctx)
   local a = { range = {3,4}, damage = { aura = 2, life = 1 } }
-  if ctx:desperation(ctx:player()) then a.damage.aura = 3 end   -- 声明时锁定
+  if ctx:desperation(ctx:player()) then a.damage.aura = 3 end   -- 决死类条件
   return a
 end
 ```
+牌在打出后、攻击结算前还要给**本牌这次攻击**加值的场合用 `ctx:self_boost(fn)`：
+```lua
+on_play = function(ctx)
+  ctx:self_boost(function(c2, atk) atk:add { aura = 1 } end)   -- 只作用于本牌的下一次攻击
+end
+```
+
+**集中力**：获得用 `ctx:gain_vigor(p, n)`（受畏缩/上限约束）；支付用
+`ctx:cost_vigor(p, n)`；「集中力变 X」类定值效果用 `ctx:vigor_to(p, x)`。
+没有裸 `set_vigor`——内容 API 审计测试会拒绝未注册方法的调用。
 
 **切牌再起**：`reset = { kind = "end_turn", cond = function(ctx) ... end }`
 或 `kind = "immediate"`（即再起）；事件驱动加 `on = "<事件名>"`。

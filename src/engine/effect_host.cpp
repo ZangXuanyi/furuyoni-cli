@@ -240,6 +240,10 @@ struct EffectHost::Impl {
 EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   auto& L = impl_->lua;
   L.open_libraries(sol::lib::base, sol::lib::table, sol::lib::string, sol::lib::math);
+  // self_boost 的匹配闭包工厂（见 ctx["self_boost"] 绑定）。
+  L.safe_script("function __fy_self_match(inst)\n"
+                "  return function(_, atk) return atk:source_inst() == inst end\n"
+                "end");
   L["os"] = sol::nil;
   L["io"] = sol::nil;
   if (L["math"].valid()) L["math"]["random"] = sol::nil;
@@ -705,13 +709,22 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   };
   ctx["draw"] = [](LuaCtx& c, int p, int n) { c.e->draw(static_cast<Player>(p), n); };
   ctx["gain_vigor"] = [](LuaCtx& c, int p, int n) { c.e->gain_vigor(static_cast<Player>(p), n); };
-  ctx["set_vigor"] = [](LuaCtx& c, int p, int n) { c.e->ps(static_cast<Player>(p)).vigor = n; };
+  // 集中力正名接口（取代裸 set_vigor）：cost_vigor = 支付（下限 0；畏缩只拦「获得」）；
+  // vigor_to = 设为定值（「集中力变 X」类卡面，clamp 0..2）。
+  ctx["cost_vigor"] = [](LuaCtx& c, int p, int n) {
+    c.e->ps(static_cast<Player>(p)).vigor = std::max(0, c.e->ps(static_cast<Player>(p)).vigor - n);
+  };
+  ctx["vigor_to"] = [](LuaCtx& c, int p, int n) {
+    int v = n < 0 ? 0 : (n > 2 ? 2 : n);
+    c.e->ps(static_cast<Player>(p)).vigor = v;
+  };
   ctx["cower"] = [](LuaCtx& c, int p) { c.e->give_cower(static_cast<Player>(p)); };
   ctx["lose_life"] = [](LuaCtx& c, int p, int n, sol::optional<std::string> to) {
     AreaKind k = AreaKind::Flare;
     if (to && *to == "dust") k = AreaKind::Dust;
     c.e->damage_life(static_cast<Player>(p), n, k, true);
   };
+
   ctx["rebuild"] = [](LuaCtx& c, int p, sol::optional<bool> cost) {
     c.e->rebuild(static_cast<Player>(p), cost ? *cost : false);
   };
@@ -724,6 +737,20 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   };
   ctx["do_basic"] = [](LuaCtx& c, int p, std::string a) {
     return c.e->do_basic(static_cast<Player>(p), parse_basic(a));
+  };
+  // self_boost{aura=, life=}：本牌攻击自增益的惯用形——只匹配本牌实例的
+  // 下一次攻击修正（决死/八相类条件词条）。等价于手写
+  // next_attack_mod{match=function(atk) return atk:source_inst()==<本牌> end}。
+  // self_boost(fn)：本牌攻击自增益的惯用形——注册只匹配本牌实例、本回合内
+  // 过期的下一次攻击修正（决死/八相类条件词条）。取代内容侧的 boost_self 复制。
+  ctx["self_boost"] = [this](LuaCtx& c, sol::function apply) {
+    Impl::PendingMod m;
+    m.owner = c.who;
+    m.expires = true;  // 与内容惯用形一致：本回合内
+    sol::function mk = impl_->lua["__fy_self_match"];
+    m.match = mk(c.source);
+    m.apply = apply;
+    impl_->pending.push_back(std::move(m));
   };
   ctx["next_attack_mod"] = [this](LuaCtx& c, sol::table t) {
     Impl::PendingMod m;

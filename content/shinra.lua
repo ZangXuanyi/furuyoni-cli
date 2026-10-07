@@ -239,7 +239,7 @@ return {
     on_expand = function(ctx)
       if ctx:vigor(ctx:player()) >= 1 then
         if ctx:choose("使徒：支付 1 集中力并重新准备计策？", { "是", "否" }) == 1 then
-          ctx:set_vigor(ctx:player(), ctx:vigor(ctx:player()) - 1)
+          ctx:cost_vigor(ctx:player(), 1)
           ctx:prepare_strategy(ctx:player())
         end
       end

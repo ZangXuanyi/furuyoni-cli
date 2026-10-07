@@ -196,7 +196,7 @@ return {
       local opp = ctx:opp()
       ctx:discard_all_hand(opp)
       ctx:discard_deck(opp)
-      ctx:set_vigor(opp, 0)
+      ctx:vigor_to(opp, 0)
       ctx:cower(opp)
     end },
 

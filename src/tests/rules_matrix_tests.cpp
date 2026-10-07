@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -243,5 +244,74 @@ TEST_CASE("content names referenced by the engine all exist") {
     INFO("name: ", n);
     std::string msg = std::string("engine special-cases a card name that no content defines: ") + n;
     CHECK_MESSAGE(found, msg);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 内容 API 审计：content/*.lua 中调用的每个 ctx/atk/ev 方法必须已注册。
+// 防止「删除绑定后内容残留调用」只在未测路径上炸（strictLua 才发现）。
+// ---------------------------------------------------------------------------
+TEST_CASE("content api audit: all called methods are bound") {
+  // 从 effect_host.cpp + mechanics/*.cpp 收集已注册方法名。
+  std::set<std::string> bound;
+  auto collect = [&](const std::string& path) {
+    std::FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) return;
+    std::string src;
+    char buf[4096];
+    size_t n;
+    while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) src.append(buf, n);
+    std::fclose(f);
+    size_t pos = 0;
+    while ((pos = src.find("[\"", pos)) != std::string::npos) {
+      size_t e = src.find('"', pos + 2);
+      if (e == std::string::npos) break;
+      std::string name = src.substr(pos + 2, e - pos - 2);
+      if (!name.empty() && name.find(' ') == std::string::npos) bound.insert(name);
+      pos = e;
+    }
+  };
+  collect("src/engine/effect_host.cpp");
+  for (const char* m : {"blocks", "steam", "ice", "wound", "market", "soil", "fate", "drama",
+                        "dive", "barracks", "curse", "poison", "keiryo", "slots", "parts", "memory"}) {
+    collect(std::string("src/engine/mechanics/") + m + ".cpp");
+  }
+  // Attack/Event 的 usertype 名不同（atkutil/ev），单独并入同一集合审计（宽松）。
+  // 扫描内容侧所有 :method( 调用（排除 Lua 标准库）。
+  std::set<std::string> lua_std = {"ipairs", "pairs", "tostring", "tonumber", "type",
+                                   "table", "math", "string", "select", "next", "setmetatable"};
+  for (const auto& entry : std::filesystem::directory_iterator("content")) {
+    if (entry.path().extension() != ".lua") continue;
+    std::FILE* f = std::fopen(entry.path().c_str(), "rb");
+    if (!f) continue;
+    std::string src;
+    char buf[4096];
+    size_t n;
+    while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) src.append(buf, n);
+    std::fclose(f);
+    size_t pos = 0;
+    while ((pos = src.find(":", pos)) != std::string::npos) {
+      size_t b = pos + 1;
+      if (b < src.size() && std::isalpha(static_cast<unsigned char>(src[b]))) {
+        size_t e = b;
+        while (e < src.size() && (std::isalnum(static_cast<unsigned char>(src[e])) || src[e] == '_')) ++e;
+        std::string name = src.substr(b, e - b);
+        bool called = e < src.size() && (src[e] == '(' || src[e] == '{');
+        if (called && pos > 0) {
+          size_t vs = pos - 1;
+          while (vs > 0 && (std::isalnum(static_cast<unsigned char>(src[vs])) || src[vs] == '_')) --vs;
+          std::string var = src.substr(vs + 1, pos - vs - 1);
+          if ((var == "ctx" || var == "c2" || var == "c" || var == "atk" || var == "a" ||
+               var == "ev") &&
+              !lua_std.count(name) && !bound.count(name)) {
+            const std::string msg = std::string("unbound method ") + name + " in " + entry.path().string();
+            CHECK_MESSAGE(false, msg);
+          }
+        }
+        pos = e;
+        continue;
+      }
+      ++pos;
+    }
   }
 }

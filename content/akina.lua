@@ -127,7 +127,7 @@ return {
       if ctx:vigor(me) >= 1 then
         local pick = ctx:choose("直接金融：支付 1 集中力再执行一次？", { "支付", "不支付" })
         if pick == 1 then
-          ctx:set_vigor(me, ctx:vigor(me) - 1)
+          ctx:cost_vigor(me, 1)
           ctx:move("aura", "aura", 1, ctx:opp(), me)
         end
       end

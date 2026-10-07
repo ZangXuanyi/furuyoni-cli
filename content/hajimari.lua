@@ -54,7 +54,7 @@ return {
     cost = 1, full_power = true,
     on_play = function(ctx)
       ctx:discard_all_hand(ctx:opp())
-      ctx:set_vigor(ctx:opp(), 0)
+      ctx:vigor_to(ctx:opp(), 0)
     end,
     reset = { kind = "end_turn", cond = function(ctx) return ctx:dust() >= 10 end } },
 

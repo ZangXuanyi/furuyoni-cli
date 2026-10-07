@@ -18,12 +18,7 @@
 
 -- 让“本张正在结算的攻击牌”获得一次性修正（在 finalize 阶段生效）。
 local function boost_self(ctx, fn)
-  local inst = ctx:source_inst()
-  ctx:next_attack_mod {
-    match = function(_, atk) return atk:source_inst() == inst end,
-    apply = fn,
-    this_turn = true,
-  }
+  ctx:self_boost(fn)
 end
 
 -- 打消被对应的攻击（用于 击落 / 防御 / 天主八龙阁 的共用判定）。

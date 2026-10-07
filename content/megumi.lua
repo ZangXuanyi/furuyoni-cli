@@ -17,12 +17,7 @@
 
 -- 让“本张正在结算的攻击牌”获得一次性修正。
 local function boost_self(ctx, fn)
-  local inst = ctx:source_inst()
-  ctx:next_attack_mod {
-    match = function(_, atk) return atk:source_inst() == inst end,
-    apply = fn,
-    this_turn = true,
-  }
+  ctx:self_boost(fn)
 end
 
 return {

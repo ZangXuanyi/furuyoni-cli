@@ -14,7 +14,7 @@ return {
       if not ctx:is_my_turn() then return end
       for _, i in ipairs(ctx:hand(0)) do ctx:cover_card(i) end
       for _, i in ipairs(ctx:hand(1)) do ctx:cover_card(i) end
-      ctx:set_vigor(ctx:player(), 0)
+      ctx:vigor_to(ctx:player(), 0)
     end },
 
   { set = "hagane", form = "O", num = 2, name = "砂风尘", kind = "normal", type = "attack",
@@ -28,7 +28,7 @@ return {
     full_power = true,
     attack = { range = {0, 3}, damage = { aura = 2 }, keywords = { "unrespondable" } },
     on_attack_after = function(ctx)
-      ctx:set_vigor(ctx:opp(), 0)
+      ctx:vigor_to(ctx:opp(), 0)
       ctx:cower(ctx:opp())
     end },
 

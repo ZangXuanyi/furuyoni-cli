@@ -125,3 +125,18 @@ hajimari 语料应 30/30 帧一致，standard 语料分歧应全部起于付与�
   对齐 rules/10-kururu.md:28 卡面文本。
 - 验证：216/216 用例（含 2 个新钉死测试：纯公开请求形态/检视选择等价+cuts 过滤）、
   600 局模糊、ASan 100 局全绿。
+
+## Lua v2 第一批（2026-10-07）
+
+- `ctx:cost_vigor(p, n)`（支付，下限 0）/ `ctx:vigor_to(p, n)`（「集中力变 X」，
+  clamp 0..2）取代裸写入器 `ctx:set_vigor`——**已删除**，12 处内容调用按语义迁移。
+  期间一次删除事故（连带误删 cower/lose_life 绑定）被测试当场抓住并恢复；
+  raira 一处漏迁移因测试路径未覆盖而静默——由此新增**内容 API 审计测试**
+  （rules_matrix_tests：内容调用的每个 ctx/atk/ev 方法必须已注册，静态全量扫描）。
+- `ctx:self_boost(fn)`：本牌攻击自增益的惯用形（匹配本牌实例、本回合过期），
+  取代内容侧 boost_self 复制（mizuki/megumi 已迁移）。发现：部分旧复制用单参
+  `function(atk)` 接两参 match 调用，实际匹配到 ctx（碰巧等值、语义为「本回合
+  任意攻击」）——self_boost 的工厂闭包为正确的两参形态。
+- `responded_is_plain` 与移动菜单上收、其余 16 处 next_attack_mod 手写迁移：
+  见剩余清单。
+- 验证：223/223 + 400 局模糊 + ASan 100 局全绿。

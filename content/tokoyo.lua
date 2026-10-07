@@ -57,7 +57,7 @@ return {
   -- 终端（结束主要阶段）；展开时集中力变 2；弃置时生成攻击。
   { set = "tokoyo", form = "O", num = 7, name = "晴舞台", kind = "normal", type = "enhance",
     nagi = 2, terminal = true,
-    on_expand = function(ctx) ctx:set_vigor(ctx:player(), 2) end,
+    on_expand = function(ctx) ctx:vigor_to(ctx:player(), 2) end,
     on_discard = function(ctx) ctx:attack { range = {3, 6}, damage = { life = 1 } } end },
 
   -- 切
@@ -95,8 +95,8 @@ return {
   { set = "tokoyo", form = "O", num = 4, name = "常世之月", kind = "special", type = "action",
     cost = 2,
     on_play = function(ctx)
-      ctx:set_vigor(ctx:player(), 2)
-      ctx:set_vigor(ctx:opp(), 0)
+      ctx:vigor_to(ctx:player(), 2)
+      ctx:vigor_to(ctx:opp(), 0)
       ctx:cower(ctx:opp())
     end },
 

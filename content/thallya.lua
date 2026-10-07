@@ -47,11 +47,11 @@ return {
       if ctx:can_burn(me, 2) and ctx:choose("轰鸣：燃烧2并获得1集中力？", { "是", "否" }) == 1 then
         ctx:burn(me, 2)
         ctx:gain_vigor(me, 1)
-        ctx:set_vigor(ctx:opp(), math.max(0, ctx:vigor(ctx:opp()) - 1))
+        ctx:cost_vigor(ctx:opp(), 1)
         ctx:cower(ctx:opp())
       end
       if ctx:vigor(me) >= 2 and ctx:choose("轰鸣：支付2集中力并恢复3？", { "是", "否" }) == 1 then
-        ctx:set_vigor(me, ctx:vigor(me) - 2)
+        ctx:cost_vigor(me, 2)
         ctx:recover(me, 3)
       end
     end },

@@ -41,7 +41,7 @@ local function use_raira(ctx, forbidSame, used)
       end
     else
       ctx:gain_vigor(me, 1)
-      ctx:set_vigor(ctx:opp(), math.max(0, ctx:vigor(ctx:opp()) - 1))
+      ctx:cost_vigor(ctx:opp(), 1)
     end
   else
     if o.tier == 1 then
