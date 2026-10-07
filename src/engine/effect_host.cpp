@@ -367,6 +367,7 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["discard_size"] = [](LuaCtx& c, int p) { return static_cast<int>(c.e->ps(static_cast<Player>(p)).discard.size()); };
   ctx["cover_size"] = [](LuaCtx& c, int p) { return static_cast<int>(c.e->ps(static_cast<Player>(p)).cover.size()); };
   ctx["distance"] = [](LuaCtx& c) { return c.e->distance(); };
+  ctx["dust"] = [](LuaCtx& c) { return c.e->st.dust; };
   // 25-Misora 观空: 瞄准点（-1 = 不存在）。
   ctx["aim"] = [](LuaCtx& c, sol::optional<int> p) {
     return c.e->aim(p ? static_cast<Player>(*p) : c.who);
@@ -374,53 +375,6 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["set_aim"] = [](LuaCtx& c, int p, int v) {
     c.e->set_aim(static_cast<Player>(p), v);
   };
-  // ---- 26-Innealra 诺伦: 惑 / 命运槽 / 共鸣 / 纠葛 --------------------------
-  ctx["waku"] = [](LuaCtx& c, sol::optional<int> p) {
-    return c.e->ps(p ? static_cast<Player>(*p) : c.who).waku;
-  };
-  ctx["fate_slot"] = [](LuaCtx& c, int i) { return c.e->fate_slot(c.who, i); };
-  ctx["fate_pos"] = [](LuaCtx& c, std::string name) { return c.e->fate_pos(c.who, name); };
-  ctx["resolve_fate_slot"] = [](LuaCtx& c, int i, sol::optional<bool> fts) {
-    c.e->resolve_fate_slot(c.who, i, fts.value_or(false));
-  };
-  ctx["resonance"] = [](LuaCtx& c, sol::optional<bool> fts) {
-    c.e->resonance(c.who, fts.value_or(false));
-  };
-  ctx["rotate_fates"] = [](LuaCtx& c) { c.e->rotate_fates(c.who); };
-  ctx["entangle_fates"] = [](LuaCtx& c, bool v) { c.e->entangle_fates(c.who, v); };
-  ctx["fates_entangled"] = [](LuaCtx& c, sol::optional<int> p) {
-    return c.e->fates_entangled(p ? static_cast<Player>(*p) : c.who);
-  };
-  ctx["resonance_count"] = [](LuaCtx& c, sol::optional<int> p) {
-    return c.e->resonance_count(p ? static_cast<Player>(*p) : c.who);
-  };
-  ctx["used_non_innealra"] = [](LuaCtx& c, sol::optional<int> p) {
-    return c.e->used_non_innealra(p ? static_cast<Player>(*p) : c.who);
-  };
-  ctx["used_normal_this_turn"] = [](LuaCtx& c, sol::optional<int> p) {
-    return c.e->ps(p ? static_cast<Player>(*p) : c.who).usedNormalThisTurn;
-  };
-  ctx["fate_resolving_slot"] = [](LuaCtx& c) { return c.e->fate_resolving_slot(); };
-  ctx["fate_from_turn_start"] = [](LuaCtx& c) { return c.e->fate_from_turn_start(); };
-  ctx["cost_paid"] = [](LuaCtx& c) { return c.e->cost_paid(c.source); };
-  ctx["cost_to_waku"] = [](LuaCtx& c) { return c.e->cost_to_waku(c.who, c.source); };
-  ctx["last_attack_responded"] = [](LuaCtx& c) { return c.e->last_attack_responded(); };
-  ctx["set_cannot_use_normals"] = [](LuaCtx& c, int p) {
-    c.e->ps(static_cast<Player>(p)).cannotUseNormals = true;
-  };
-  ctx["cannot_use_normals"] = [](LuaCtx& c, int p) {
-    return c.e->ps(static_cast<Player>(p)).cannotUseNormals;
-  };
-  ctx["set_cannot_retreat"] = [](LuaCtx& c, int p) {
-    c.e->ps(static_cast<Player>(p)).cannotRetreat = true;
-  };
-  ctx["set_rebuild_freeze"] = [](LuaCtx& c, int p) {
-    c.e->set_rebuild_freeze(static_cast<Player>(p));
-  };
-  ctx["fragile_will_active"] = [](LuaCtx& c, int p) {
-    return c.e->fragile_will_host(static_cast<Player>(p)) >= 0;
-  };
-  ctx["dust"] = [](LuaCtx& c) { return c.e->st.dust; };
   ctx["crystals"] = [](LuaCtx& c, int inst) { return c.e->ci(inst).crystals; };
   ctx["desperation"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).life <= 3; };
   ctx["hasso"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).aura <= 1; };

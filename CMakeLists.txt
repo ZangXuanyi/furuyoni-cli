@@ -27,6 +27,7 @@ add_library(furuyoni
   src/engine/mechanics/wound.cpp
   src/engine/mechanics/market.cpp
   src/engine/mechanics/soil.cpp
+  src/engine/mechanics/fate.cpp
   src/engine/effect_host.cpp
   src/protocol/agent.cpp
 )

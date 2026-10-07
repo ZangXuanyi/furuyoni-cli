@@ -14,6 +14,7 @@ void ice_ctx(CtxTypes& t);     // 15-Konuru
 void wound_ctx(CtxTypes& t);   // 24-Shisui
 void market_ctx(CtxTypes& t);  // 23-Akina
 void soil_ctx(CtxTypes& t);    // 19-Megumi
+void fate_ctx(CtxTypes& t);    // 26-Innealra
 
 }  // namespace mechanics
 
@@ -23,6 +24,7 @@ void run_mechanic_ctx_blocks(CtxTypes& t) {
   mechanics::wound_ctx(t);
   mechanics::market_ctx(t);
   mechanics::soil_ctx(t);
+  mechanics::fate_ctx(t);
 }
 
 }  // namespace fy
