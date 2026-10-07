@@ -16,6 +16,9 @@ void market_ctx(CtxTypes& t);  // 23-Akina
 void soil_ctx(CtxTypes& t);    // 19-Megumi
 void fate_ctx(CtxTypes& t);    // 26-Innealra
 void drama_ctx(CtxTypes& t);   // 20-Kanawe
+void dive_ctx(CtxTypes& t);    // 17-Hatsumi
+void barracks_ctx(CtxTypes& t);// 18-Mizuki
+void curse_ctx(CtxTypes& t);   // 21-Kamuwi
 
 }  // namespace mechanics
 
@@ -27,6 +30,9 @@ void run_mechanic_ctx_blocks(CtxTypes& t) {
   mechanics::soil_ctx(t);
   mechanics::fate_ctx(t);
   mechanics::drama_ctx(t);
+  mechanics::dive_ctx(t);
+  mechanics::barracks_ctx(t);
+  mechanics::curse_ctx(t);
 }
 
 }  // namespace fy

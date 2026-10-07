@@ -29,6 +29,9 @@ add_library(furuyoni
   src/engine/mechanics/soil.cpp
   src/engine/mechanics/fate.cpp
   src/engine/mechanics/drama.cpp
+  src/engine/mechanics/dive.cpp
+  src/engine/mechanics/barracks.cpp
+  src/engine/mechanics/curse.cpp
   src/engine/effect_host.cpp
   src/protocol/agent.cpp
 )

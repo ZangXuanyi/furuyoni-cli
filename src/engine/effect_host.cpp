@@ -514,13 +514,6 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["can_upgrade"] = [](LuaCtx& c, int inst) { return c.e->can_upgrade(inst); };
   ctx["upgrade_card"] = [](LuaCtx& c, int inst) { return c.e->upgrade_card(inst); };
   ctx["turn_number"] = [](LuaCtx& c) { return c.e->st.turn; };
-  ctx["curse"] = [](LuaCtx& c, int p) { return c.e->curse(static_cast<Player>(p)); };
-  ctx["add_curse"] = [](LuaCtx& c, int p, int n) {
-    c.e->add_curse(static_cast<Player>(p), n);
-  };
-  ctx["set_extra_attack_cost"] = [](LuaCtx& c, int p, std::string goddess) {
-    c.e->ps(static_cast<Player>(p)).extraAttackCostGoddess = goddess;
-  };
   ctx["memory_size"] = [](LuaCtx& c, int p) {
     return c.e->memory_size(static_cast<Player>(p));
   };
@@ -570,13 +563,6 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     c.e->add_temp_near_distance(static_cast<Player>(p), n);
   };
   // ---- 17-Hastumi: 航海 / 潜水 ---------------------------------------------
-  ctx["tailwind"] = [](LuaCtx& c, sol::optional<int> p) {
-    return c.e->tailwind(p ? static_cast<Player>(*p) : c.who);
-  };
-  ctx["dive"] = [](LuaCtx& c, int kind) { c.e->declare_dive(c.who, kind); };
-  ctx["dive_state"] = [](LuaCtx& c, sol::optional<int> p) {
-    return c.e->dive_state(p ? static_cast<Player>(*p) : c.who);
-  };
   // 牌库顶（下一次抽到的牌）；牌库为空返回 -1。
   ctx["deck_top"] = [](LuaCtx& c, int p) {
     const auto& d = c.e->ps(static_cast<Player>(p)).deck;
@@ -785,35 +771,6 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     return c.e->has_full_power(inst);  // 18-Mizuki O-S4 会移除全力
   };
   // ---- 18-Mizuki: 动员 / 兵舍 / 阵地 ----------------------------------------
-  ctx["position"] = [](LuaCtx& c, sol::optional<int> p) {
-    return c.e->position(p ? static_cast<Player>(*p) : c.who);
-  };
-  ctx["mobilize"] = [](LuaCtx& c, sol::optional<int> p) {
-    return c.e->mobilize(p ? static_cast<Player>(*p) : c.who);
-  };
-  ctx["is_soldier"] = [](LuaCtx& c, int inst) { return c.e->is_soldier(inst); };
-  ctx["soldier_mobilized"] = [](LuaCtx& c, int inst) {
-    return c.e->soldier_mobilized(inst);
-  };
-  ctx["barracks"] = [](LuaCtx& c, sol::optional<int> p, sol::this_state ts) -> sol::object {
-    std::vector<int> v =
-        c.e->ps(p ? static_cast<Player>(*p) : c.who).barracks;
-    sol::table t = sol::table::create(ts.L);
-    for (size_t i = 0; i < v.size(); ++i) t[i + 1] = v[i];
-    return sol::make_object(ts.L, t);
-  };
-  ctx["barracks_count"] = [](LuaCtx& c, sol::optional<int> p) {
-    return static_cast<int>(c.e->ps(p ? static_cast<Player>(*p) : c.who).barracks.size());
-  };
-  ctx["mobilized_count"] = [](LuaCtx& c, sol::optional<int> p) {
-    return c.e->barracks_mobilized_count(p ? static_cast<Player>(*p) : c.who);
-  };
-  ctx["gain_soldier"] = [](LuaCtx& c, std::string name) {
-    return c.e->gain_soldier(c.who, name);
-  };
-  ctx["hand_to_barracks"] = [](LuaCtx& c, int inst) {
-    c.e->hand_to_barracks(c.who, inst);
-  };
   ctx["responded_last_turn"] = [](LuaCtx& c, sol::optional<int> p) {
     return c.e->responded_last_turn(p ? static_cast<Player>(*p) : c.who);
   };

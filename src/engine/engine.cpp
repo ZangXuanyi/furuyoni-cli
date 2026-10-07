@@ -743,95 +743,19 @@ std::string Engine::card_zone(int inst) const {
 // 18-Mizuki: 动员 / 兵舍 / 阵地 / 词条改写
 // ---------------------------------------------------------------------------
 
-bool Engine::is_soldier(int inst) const {
-  if (inst < 0 || inst >= static_cast<int>(st.insts.size())) return false;
-  if (ci(inst).soldier) return true;
-  const auto& bq = ps(ci(inst).holder).barracks;
-  return std::find(bq.begin(), bq.end(), inst) != bq.end();
-}
 
-int Engine::barracks_mobilized_count(Player p) const {
-  int c = 0;
-  for (int inst : ps(p).barracks)
-    if (ci(inst).faceUp) c += 1;
-  return c;
-}
 
-void Engine::leave_barracks(Player p, int inst) {
-  auto& bq = ps(p).barracks;
-  bq.erase(std::remove(bq.begin(), bq.end(), inst), bq.end());
-}
 
-void Engine::to_barracks(Player p, int inst, bool mobilized) {
-  CardInstance& c = ci(inst);
-  leave_barracks(p, inst);
-  c.holder = p;
-  c.zone = Zone::Limbo;  // 兵舍不是通用区域：不列入任何 zone 向量（见 zone_ptr）
-  c.faceUp = mobilized;
-  ps(p).barracks.push_back(inst);
-}
 
-int Engine::mobilize(Player p) {
-  std::vector<int> cand;
-  for (int inst : ps(p).barracks)
-    if (!ci(inst).faceUp) cand.push_back(inst);
-  if (cand.empty()) return -1;  // 兵舍里没有未动员的士兵则无事发生
-  int pick = cand[0];
-  if (cand.size() > 1) {
-    Request r;
-    r.kind = "option";
-    r.prompt = "动员：选择一张士兵翻到正面";
-    for (int inst : cand) r.options.push_back({def_of(inst).name, true, {}});
-    int idx = ask_one(p, std::move(r));
-    if (idx < 0) idx = 0;
-    if (idx >= static_cast<int>(cand.size())) idx = static_cast<int>(cand.size()) - 1;
-    pick = cand[static_cast<size_t>(idx)];
-  }
-  ci(pick).faceUp = true;
-  return pick;
-}
 
-int Engine::gain_soldier(Player p, const std::string& name) {
-  for (const CardDef& d : defs)
-    if (d.isExtra && d.name == name) {
-      int inst = add_instance(d.id, p);
-      ci(inst).soldier = true;
-      to_barracks(p, inst, true);  // 以已动员状态加入兵舍
-      return inst;
-    }
-  return -1;
-}
 
-void Engine::hand_to_barracks(Player p, int inst) {
-  auto& h = ps(p).hand;
-  if (std::find(h.begin(), h.end(), inst) == h.end()) return;
-  h.erase(std::remove(h.begin(), h.end(), inst), h.end());
-  ci(inst).soldier = true;  // 这张手牌此后也视为你的士兵
-  to_barracks(p, inst, true);
-}
 
 void Engine::note_distance_changed() {
   ps(P0).distChanged = true;
   ps(P1).distChanged = true;
 }
 
-bool Engine::position(Player p) {
-  // 有效距离（含光环修正）变化即算；达人距离的变动不算。
-  const int d = distance();
-  if (d != distanceBaseline_) {
-    distanceBaseline_ = d;
-    note_distance_changed();
-  }
-  return !ps(p).distChanged;
-}
 
-bool Engine::terminal_rewrite_active(Player p) const {
-  for (int inst : ps(p).enhance)
-    if (def_of(inst).terminalRewrite) return true;
-  for (int inst : ps(p).special)
-    if (ci(inst).faceUp && enhance_active(inst) && def_of(inst).terminalRewrite) return true;
-  return false;
-}
 
 bool Engine::has_terminal(int inst) const {
   const CardDef& d = def_of(inst);
@@ -1271,36 +1195,8 @@ int Engine::nagi_value(int defId, Player p, int inst) {
   return d.nagi;
 }
 
-void Engine::add_curse(Player p, int n) {
-  if (n <= 0 || st.over) return;
-  int before = ps(p).curse;
-  ps(p).curse += n;
-  fire("cursed", p, nullptr, -1, false);  // 尸: 即再起（诅咒变为 6 / 12）
-  if (ps(p).curse >= 16) {  // 诅咒 >= 16 即死亡（另一个死亡条件是命 == 0）
-    if (ps(p).life > 0) damage_life(p, ps(p).life, AreaKind::Flare, true);  // 保持结晶守恒
-    check_win();
-  }
-  (void)before;
-}
 
-bool Engine::protects_enemy(Player p) const {
-  // p 的对手有 protects_enemy 的牌 → p 不会死亡（21 阡）。
-  Player o = opp(p);
-  for (int inst : ps(o).enhance)
-    if (def_of(inst).protectsEnemy) return true;
-  for (int inst : ps(o).special)
-    if (enhance_active(inst) && def_of(inst).protectsEnemy) return true;
-  return false;
-}
 
-int Engine::deny_aura_host(Player p) const {
-  Player o = opp(p);
-  for (int inst : ps(o).enhance)
-    if (def_of(inst).denyEnemyAura) return inst;
-  for (int inst : ps(o).special)
-    if (enhance_active(inst) && def_of(inst).denyEnemyAura) return inst;
-  return -1;
-}
 
 void Engine::clamp_aura(Player p) {
   int over = ps(p).aura + ps(p).ice - max_aura(p);
