@@ -1,8 +1,0 @@
-ruleset: preset=kigen-full variants=off packs=tatsujin+official goddesses=26 modules=26
-seed=7 turns=26 winner=0 hash=10650286909723869294
-Player0 （镰）旗橇 胜 Player1 （镰）旗橇
-P0 life=1 aura=1 flare=2 vigor=0 hand=0 deck=0 cover=7 enhance=0
-P1 life=0 aura=0 flare=3 vigor=1 hand=0 deck=0 cover=7 enhance=0
-dust=27 distance=2
-recorded 152 decisions to matches/smoke/game.json
-replay viewer written: matches/smoke/replay.html

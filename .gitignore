@@ -10,3 +10,4 @@ build-*/
 .zcodeignorematches/
 demo-replay*.html
 .zcodeignore
+matches/
