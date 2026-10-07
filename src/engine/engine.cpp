@@ -244,135 +244,23 @@ void Engine::move_card_bottom(int inst) {
 }
 
 int Engine::amount(AreaRef a) const {
-  switch (a.kind) {
-    case AreaKind::Life:     return st.p[a.p].life;
-    case AreaKind::Aura:     return st.p[a.p].aura;
-    case AreaKind::Flare:    return st.p[a.p].flare;
-    case AreaKind::Distance: return st.distance;
-    case AreaKind::Dust:     return st.dust;
-    case AreaKind::Card:     return ci(a.inst).crystals;
-    case AreaKind::Market:   return st.p[a.p].market;  // 23-Akina 股市
-    case AreaKind::Waku:     return st.p[a.p].waku;    // 26-Innealra 惑
-  }
-  return 0;
+  // 统一 Token 入口：樱花计数走 token_amount（土壤/蒸汽区无樱花，返回 0）。
+  return token_amount(a, Token::Sakura);
 }
 
 void Engine::add_crystals(AreaRef a, int n) {
-  switch (a.kind) {
-    case AreaKind::Life: {
-      const int before = st.p[a.p].life;
-      st.p[a.p].life = std::clamp(st.p[a.p].life + n, 0, st.maxLife);
-      note_life_change(st.p[a.p].life - before);  // 20-Kanawe 《鼓动》
-      break;
-    }
-    case AreaKind::Aura: {
-      bool was_full = armor_full(a.p);
-      st.p[a.p].aura =
-          std::clamp(st.p[a.p].aura + n, 0, std::max(0, max_aura(a.p) - st.p[a.p].ice));
-      // 装变满的瞬间（吹雪式的即再起）——不是由本牌的冻结造成的。
-      if (!was_full && n > 0 && armor_full(a.p))
-        fire("armor_full", a.p, nullptr, -1, false);
-      break;
-    }
-    case AreaKind::Flare:    st.p[a.p].flare = std::max(0, st.p[a.p].flare + n); break;
-    case AreaKind::Distance:
-      if (n != 0 && st.distance != std::max(0, st.distance + n)) note_distance_changed();
-      st.distance = std::max(0, st.distance + n);
-      break;
-    case AreaKind::Dust:
-      // 22-Renri 罗织: 结晶离开虚也计入「移出虚」。
-      if (n < 0 && st.dust > 0) crystalLeftDustThisTurn_ = true;
-      st.dust = std::max(0, st.dust + n);
-      break;
-    case AreaKind::Card:     ci(a.inst).crystals = std::max(0, ci(a.inst).crystals + n); break;
-    case AreaKind::Market:   st.p[a.p].market = std::max(0, st.p[a.p].market + n); break;
-    case AreaKind::Waku:     st.p[a.p].waku = std::max(0, st.p[a.p].waku + n); break;  // 26 惑
-  }
+  // 统一 Token 入口（what.md 第 1 条）：无对端增减走 token_adjust。
+  token_adjust(a, Token::Sakura, n);
 }
 
 int Engine::move_crystals(AreaRef from, AreaRef to, int n, bool cardEffect) {
-  if (n <= 0) return 0;
-  // 迷烟: card effects that would change distance are negated (basic actions are not).
-  if (cardEffect && (from.kind == AreaKind::Distance || to.kind == AreaKind::Distance) &&
-      any_lock_distance())
-    return 0;
-  int cap = std::numeric_limits<int>::max();
-  switch (to.kind) {
-    case AreaKind::Life: cap = st.maxLife - st.p[to.p].life; break;
-    case AreaKind::Aura:
-      cap = max_aura(to.p) - st.p[to.p].aura - st.p[to.p].ice;  // 冰晶也占位
-      break;
-    default: break;
-  }
-  int moved = std::min({n, amount(from), cap});
-  if (moved <= 0) return 0;
-  const bool touchesDistance =
-      (from.kind == AreaKind::Distance || to.kind == AreaKind::Distance);
-  const int distBefore = touchesDistance ? distance() : 0;
-  // 鱼雷炮击的即再起需要“对手的回合内距减小 2 或以上”的通知。必须在整个移动完成之后
-  // 才广播：事件会触发玩家决策（不变量检查），半途中的结晶总数会被判为不守恒。
-  auto notify_distance = [&]() {
-    if (!touchesDistance) return;
-    const int d = distance();
-    if (d != distBefore) {
-      note_distance_changed();  // 18-Mizuki 阵地
-      fire("distance_changed", st.active, nullptr, -1, d < distBefore);
-    }
-  };
-  // 血飞沫: 若任意数量的樱花结晶将被移动到敌装，则改为移动到虚，并此牌上的 1 个献移动到虚。
-  if (to.kind == AreaKind::Aura && from.kind != AreaKind::Card) {
-    int host = deny_aura_host(to.p);
-    if (host >= 0) {
-      int a0 = st.p[P0].aura, a1 = st.p[P1].aura;
-      add_crystals(from, -moved);
-      add_crystals(AreaRef::dust(), moved);
-      if (ci(host).crystals + ci(host).green > 0) {
-        int sak = 0;
-        take_card_crystals(host, 1, kTakeNormal, &sak);
-        if (sak > 0) add_crystals(AreaRef::dust(), sak);
-        drop_enhance_if_empty(host);
-      }
-      if (st.p[P0].aura != a0) notify_aura_changed(P0);
-      if (st.p[P1].aura != a1) notify_aura_changed(P1);
-      notify_distance();
-      note_crystal_move(from, AreaRef::dust(), moved, cardEffect);
-      check_dramas();
-      return moved;
-    }
-  }
-  // 26-Innealra O2-N6 脆弱意志: 对手（此牌的持有者）因「装附外的手段」把樱花结晶
-  // 移到自装时改为移到这张牌上；因「基本动作」装附时照常移动，然后从这张牌上把
-  // 1 个樱花结晶移到虚。
-  if (to.kind == AreaKind::Aura && from.kind != AreaKind::Card) {
-    int host = fragile_will_host(to.p);
-    if (host >= 0) {
-      const bool byBasic = inBasicAction_ && basicActor_ == to.p;
-      int a0b = st.p[P0].aura, a1b = st.p[P1].aura;
-      add_crystals(from, -moved);
-      add_crystals(byBasic ? to : AreaRef::card(host), moved);
-      if (st.p[P0].aura != a0b) notify_aura_changed(P0);
-      if (st.p[P1].aura != a1b) notify_aura_changed(P1);
-      notify_distance();
-      note_crystal_move(from, byBasic ? to : AreaRef::card(host), moved, cardEffect);
-      if (byBasic) {
-        int sak = 0;
-        take_card_crystals(host, 1, kTakeNormal, &sak);
-        if (sak > 0) add_crystals(AreaRef::dust(), sak);
-        drop_enhance_if_empty(host);
-      }
-      check_dramas();
-      return moved;
-    }
-  }
-  int a0 = st.p[P0].aura, a1 = st.p[P1].aura;
-  add_crystals(from, -moved);
-  add_crystals(to, moved);
-  if (st.p[P0].aura != a0) notify_aura_changed(P0);
-  if (st.p[P1].aura != a1) notify_aura_changed(P1);
-  notify_distance();
-  note_crystal_move(from, to, moved, cardEffect);
-  check_dramas();
-  return moved;
+  // 统一 Token 入口（what.md 第 1 条）：全部移动策略集中在 token_move。
+  MoveReq m;
+  m.from = from;
+  m.to = to;
+  m.n = n;
+  m.cardEffect = cardEffect;
+  return token_move(m);
 }
 
 bool Engine::any_lock_distance() const {
@@ -444,9 +332,11 @@ void Engine::reveal_hand(Player p) {
 void Engine::remove_card(int inst) { move_card(inst, Zone::Removed); }
 
 void Engine::gain_external(AreaRef a, int n) {
-  int before = amount(a);
-  add_crystals(a, n);
-  externalAdded_ += amount(a) - before;
+  MoveReq m;
+  m.from = AreaRef::external();
+  m.to = a;
+  m.n = n;
+  move_from_external(m);
 }
 
 int Engine::gain_extra(Player p, const std::string& name) {
@@ -1244,12 +1134,13 @@ void Engine::fire_armor_full_if_new(Player p, int cause) {
 }
 
 int Engine::freeze(Player p, int n, int cause) {
-  int add = std::min(n, aura_free(p));
-  if (add <= 0) return 0;
-  bool was_full = armor_full(p);
-  ps(p).ice += add;
-  if (!was_full && armor_full(p)) fire("armor_full", p, nullptr, cause, false);
-  return add;
+  MoveReq m;
+  m.from = AreaRef::external();
+  m.to = AreaRef::aura(p);
+  m.fromKind = m.toKind = Token::Ice;
+  m.n = n;
+  m.cause = cause;
+  return token_move(m);
 }
 
 int Engine::mirror(Player p) const {
@@ -1337,11 +1228,11 @@ int Engine::count_complete(Player p) const {
 }
 
 int Engine::lose_external(AreaRef a, int n) {
-  int before = amount(a);
-  add_crystals(a, -n);
-  int moved = before - amount(a);
-  externalAdded_ -= moved;
-  return moved;
+  MoveReq m;
+  m.from = a;
+  m.to = AreaRef::external();
+  m.n = n;
+  return move_to_external(m);
 }
 
 bool Engine::reverse_moves_active(Player p) const {
@@ -1423,8 +1314,9 @@ int Engine::deny_aura_host(Player p) const {
 void Engine::clamp_aura(Player p) {
   int over = ps(p).aura + ps(p).ice - max_aura(p);
   if (over > 0) {
-    ps(p).aura -= over;
-    st.dust += over;  // 自装中多于上限的部分移到虚
+    // 自装中多于上限的部分移到虚（静默：与旧实现一致，不触发装变化通知）。
+    token_adjust(AreaRef::aura(p), Token::Sakura, -over);
+    token_adjust(AreaRef::dust(), Token::Sakura, over);
   }
 }
 
@@ -2078,29 +1970,28 @@ void Engine::decay_crystals(int inst, int n) {
   if (n <= 0) return;
   const CardDef& d = def_of(inst);
   if (d.decayTo == "distance") {
-    st.distance += n;
-    note_distance_changed();  // 18-Mizuki 阵地
+    token_adjust(AreaRef::distance(), Token::Sakura, n);
     return;
   }
   if (d.decayToOwnerAura) {  // 漫天的花道: to the controller's 装 (or 气 when full)
     Player p = ci(inst).holder;
     int room = max_aura(p) - ps(p).aura;
     int toAura = std::min(n, room);
-    ps(p).aura += toAura;
-    if (toAura < n) ps(p).flare += n - toAura;
+    token_adjust(AreaRef::aura(p), Token::Sakura, toAura);
+    if (toAura < n) token_adjust(AreaRef::flare(p), Token::Sakura, n - toAura);
     return;
   }
   // 23-Akina O-N6 乱拨: 本牌上的樱花结晶被移除时改为移到敌气。
   if (d.decayTo == "enemy_flare") {
-    ps(opp(ci(inst).holder)).flare += n;
+    token_adjust(AreaRef::flare(opp(ci(inst).holder)), Token::Sakura, n);
     return;
   }
   // 26-Innealra O3-N6 虚幻意志: 此牌上的樱花结晶被移除时移到持有者的惑。
   if (d.decayTo == "waku") {
-    ps(ci(inst).holder).waku += n;
+    token_adjust(AreaRef::waku(ci(inst).holder), Token::Sakura, n);
     return;
   }
-  st.dust += n;
+  token_adjust(AreaRef::dust(), Token::Sakura, n);
 }
 
 void Engine::empty_card(int inst) {
@@ -2217,9 +2108,9 @@ int Engine::take_card_crystals(int inst, int n, int mode, int* sakuraOut) {
     int sak = std::min(take, c.crystals);
     int grn = take - sak;
     c.crystals -= sak;
-    ci(host).crystals += sak;
     c.green -= grn;
-    ci(host).green += grn;
+    token_adjust(AreaRef::card(host), Token::Sakura, sak);
+    token_adjust(AreaRef::card(host), Token::Green, grn);
     return take;
   }
   // 先移除樱花结晶，再移除绿色结晶；绿色回到种子（或假想树）。
@@ -2240,10 +2131,12 @@ int Engine::remove_card_crystals(int inst, int n) {
 }
 
 void Engine::seed_to_plant(Player p, int n) {
-  int k = std::min(n, ps(p).soilSeeds);
-  if (k <= 0) return;
-  ps(p).soilSeeds -= k;
-  ps(p).soilPlants += k;
+  MoveReq m;
+  m.from = m.to = AreaRef::soil(p);
+  m.fromKind = Token::Seed;
+  m.toKind = Token::Plant;
+  m.n = n;
+  token_move(m);
 }
 
 void Engine::cultivate(Player p) {
@@ -2280,25 +2173,29 @@ void Engine::grow_enhance(Player p, int inst) {
 
 int Engine::attach_green(int inst, int n) {
   if (inst < 0 || n <= 0) return 0;
-  Player p = ci(inst).holder;
-  int k = std::min(n, ps(p).soilPlants);
-  if (k <= 0) return 0;
-  ps(p).soilPlants -= k;
-  ci(inst).green += k;
-  return k;
+  MoveReq m;
+  m.from = AreaRef::soil(ci(inst).holder);
+  m.to = AreaRef::card(inst);
+  m.fromKind = Token::Plant;
+  m.toKind = Token::Green;
+  m.n = n;
+  return token_move(m);
 }
 
 int Engine::detach_green_to_seeds(int inst, int n) {
   if (inst < 0 || n <= 0) return 0;
-  int k = std::min(n, ci(inst).green);
-  ci(inst).green -= k;
-  ps(ci(inst).holder).soilSeeds += k;
-  return k;
+  MoveReq m;
+  m.from = AreaRef::card(inst);
+  m.to = AreaRef::soil(ci(inst).holder);
+  m.fromKind = Token::Green;
+  m.toKind = Token::Seed;
+  m.n = n;
+  return token_move(m);
 }
 
 void Engine::green_home(Player p) {
   if (ps(p).treeActive && tree_place_one(p) >= 0) return;
-  ps(p).soilSeeds += 1;
+  token_adjust(AreaRef::soil(p), Token::Seed, 1);
 }
 
 int Engine::tree_slot(Player p, int i) const {
@@ -3020,19 +2917,21 @@ bool Engine::guess_name(Player guesser, int cardInst) {
 
 void Engine::burn(Player p, int x) {
   if (x <= 0) return;
-  if (has_named_active(p, cards::kSariaNoKessaku)) {
-    recover(p, x);
-    return;
-  }
-  int m = std::min(x, ps(p).steamEngine);
-  ps(p).steamEngine -= m;
-  ps(p).steamExhausted += m;
+  MoveReq m;
+  m.from = AreaRef::steam_engine(p);
+  m.to = AreaRef::steam_exhausted(p);
+  m.fromKind = m.toKind = Token::Steam;
+  m.n = x;
+  token_move(m);  // 萨利亚的杰作重定向在 token_move 的蒸汽分支内
 }
 
 void Engine::recover(Player p, int x) {
-  int m = std::min(x, ps(p).steamExhausted);
-  ps(p).steamExhausted -= m;
-  ps(p).steamEngine += m;
+  MoveReq m;
+  m.from = AreaRef::steam_exhausted(p);
+  m.to = AreaRef::steam_engine(p);
+  m.fromKind = m.toKind = Token::Steam;
+  m.n = x;
+  token_move(m);
 }
 
 void Engine::pneumatic(Player p) {
@@ -3043,13 +2942,13 @@ void Engine::pneumatic(Player p) {
   r.options.push_back({"距离 +1", true, {}});
   r.options.push_back({"距离 -1", true, {}});
   int c = ask_one(p, std::move(r));
-  ps(p).steamEngine -= 1;
-  if (c == 1)
-    ps(p).steamOnCrystal += 1;
-  else
-    ps(p).steamOnDist += 1;
-  note_distance_changed();  // 18-Mizuki 阵地（气动改变有效距离）
-  fire("pneumatic", p, nullptr, -1, false);
+  MoveReq m;
+  m.from = AreaRef::steam_engine(p);
+  // 「距离 -1」→ 放在距的结晶上（每枚 -1）；「距离 +1」→ 放在距上（每枚 +1）。
+  m.to = c == 1 ? AreaRef{AreaKind::SteamOnCrystal, p, -1} : AreaRef{AreaKind::SteamOnDist, p, -1};
+  m.fromKind = m.toKind = Token::Steam;
+  m.n = 1;
+  token_move(m);  // 距上蒸汽的 distance_changed/pneumatic 事件在蒸汽分支内
 }
 
 bool Engine::raira_can(Player p, const std::string& kind, int tier) const {

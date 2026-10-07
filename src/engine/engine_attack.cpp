@@ -50,7 +50,7 @@ void Engine::spend_aura(Player target, int n) {
     int sak = 0;
     int got = take_card_crystals(inst, take, kTakeNormal, &sak);
     if (got <= 0) return;
-    st.dust += sak;
+    token_adjust(AreaRef::dust(), Token::Sakura, sak);
     remaining -= got;
     drop_enhance_if_empty(inst);  // 无音壁/遗响壁: 献尽即离场
   };
@@ -542,7 +542,11 @@ int Engine::resolve_wound_group(Player target, int area, Player source) {
   const int si = static_cast<int>(source);
   const int n = ps(target).wound[area][si];
   if (n <= 0) return 0;
-  ps(target).wound[area][si] = 0;
+  token_adjust(AreaRef::wound(static_cast<AreaKind>(area == kWoundAura    ? AreaKind::Aura
+                                                     : area == kWoundFlare ? AreaKind::Flare
+                                                                           : AreaKind::Life),
+                               target, source),
+               Token::Wound, -n);
   int moved = 0;
   // 裂伤伤害化本身是一次伤害（不是来自攻击）：更新 last_damage_* 供即再起判定，
   // 避免读到上一次伤害留下的陈旧值。
@@ -619,13 +623,15 @@ void Engine::resolve_all_wounds(Player active) {
 
 void Engine::add_wound(Player target, int area, int n, Player source) {
   if (n <= 0 || area < 0 || area > 2 || st.over) return;
-  ps(target).wound[area][static_cast<int>(source)] += n;
-  // 「命区域中来自同一玩家的裂伤数 > 其命时：立即伤害化该玩家命区域里同一来源
-  // 的那些裂伤」（塞入的那一刻）。
-  if (area == kWoundLife) {
-    while (!st.over && ps(target).wound[kWoundLife][static_cast<int>(source)] > ps(target).life)
-      resolve_wound_group(target, kWoundLife, source);
-  }
+  MoveReq m;
+  m.from = AreaRef::external();
+  m.to = AreaRef::wound(static_cast<AreaKind>(area == kWoundAura    ? AreaKind::Aura
+                                              : area == kWoundFlare ? AreaKind::Flare
+                                                                    : AreaKind::Life),
+                        target, source);
+  m.fromKind = m.toKind = Token::Wound;
+  m.n = n;
+  token_move(m);  // 命区超限立即伤害化的规则在 token_move 的裂伤分支内
 }
 
 void Engine::apply_wound_attack_damage(Player target, Player source, std::optional<int> aura,
@@ -1115,74 +1121,12 @@ void Engine::resolve_card_effect(Player p, int inst, bool asResponse, bool zenka
     }
     // Order per the rules: 展开时 first, then place 献, then discard if empty.
     if (effects_->has(defId, "on_enter")) effects_->call(*this, defId, "on_enter", p, inst);
-    int take = 0;
-    // 22-Renri 道化的觉悟: 纳 中至少要有 nagiFromLife 个结晶来自持有者的命。
-    const int lifePool = d.nagiFromLife > 0 ? ps(p).life : 0;
-    // 26-Innealra 舍弃·希冀: 这张牌的献可以从「距」中选择。
-    const int distPool = d.nagiFromDistance ? st.distance : 0;
-    int total = st.dust + ps(p).aura + lifePool + distPool;
-    // 虚伪: the opponent's newly expanded 付与 has 纳 -1 while it is expanded.
-    int enemyNagiMod = 0;
-    if (d.nagi >= 0) {
-      for (int oi : ps(opp(p)).enhance) enemyNagiMod += def_of(oi).enemyNagiMod;
-      for (int oi : ps(opp(p)).special)
-        if (ci(oi).faceUp) enemyNagiMod += def_of(oi).enemyNagiMod;
-    }
-    int nagiVal = nagi_value(d.id, p, inst) + pendingNagiAdjust_ + enemyNagiMod;
-    pendingNagiAdjust_ = 0;
-    if (nagiVal < 0) nagiVal = 0;
-    if (total > 0 && nagiVal > 0) {
-      take = std::min(nagiVal, total);
-      int fromDistance = 0;
-      if (d.nagiFromDistance && distPool > 0) {
-        const int maxD = std::min(take, distPool);
-        if (maxD > 0) {
-          Request r;
-          r.kind = "option";
-          r.prompt = "舍弃·希冀：从「距」取几个结晶作为献？";
-          for (int k = 0; k <= maxD; ++k)
-            r.options.push_back({"距 " + std::to_string(k), true, {}});
-          int pick = ask_one(p, std::move(r));
-          fromDistance = (pick >= 0 && pick <= maxD) ? pick : 0;
-        }
-      }
-      const int afterDist = take - fromDistance;
-      int fromLife = 0;
-      if (d.nagiFromLife > 0) {
-        // 至少有 nagiFromLife 个来自命；虚+装不足的部分也从命补足，
-        // 否则会凭空产生结晶（结晶守恒）。
-        const int pool = st.dust + ps(p).aura;
-        const int need = std::max(d.nagiFromLife, afterDist - pool);
-        fromLife = std::min({need, afterDist, ps(p).life});
-      }
-      const int rest = afterDist - fromLife;  // 其余从虚/装支付
-      int loDust = std::max(0, rest - ps(p).aura);
-      int hiDust = std::min(rest, st.dust);
-      if (loDust > hiDust) loDust = hiDust;  // 保守：不凭空产生结晶
-      int fromDust = loDust;
-      if (loDust != hiDust) {
-        Request r;
-        r.kind = "option";
-        r.prompt = "choose 纳 cost split";
-        for (int df = loDust; df <= hiDust; ++df) {
-          Option o;
-          o.label = "dust " + std::to_string(df) + " + aura " + std::to_string(rest - df);
-          r.options.push_back(o);
-        }
-        fromDust = loDust + ask_one(p, std::move(r));
-      }
-      int auraBefore = ps(p).aura;
-      add_crystals(AreaRef::dust(), -fromDust);
-      add_crystals(AreaRef::aura(p), -(rest - fromDust));
-      if (fromLife > 0) add_crystals(AreaRef::life(p), -fromLife);
-      if (fromDistance > 0) add_crystals(AreaRef::distance(), -fromDistance);
-      if (ps(p).aura != auraBefore) notify_aura_changed(p);
-    }
+    // pay_nagi 直接把献放到牌上（on_enter 先加的结晶保留，如 反射装置）。
+    pay_nagi(p, inst);
     if (d.kind == CardKind::Normal)
       move_card(inst, Zone::Enhance);
     else
       move_card(inst, Zone::Special);
-    ci(inst).crystals += take;  // on_enter may have added crystals (e.g. 反射装置)
     // 献 placed: cards that react to the final 献 count (寄花: 展开时移 X 个到虚).
     if (effects_->has(defId, "on_expanded"))
       effects_->call(*this, defId, "on_expanded", p, inst);

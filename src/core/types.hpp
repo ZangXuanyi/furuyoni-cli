@@ -133,16 +133,28 @@ struct AttackSpec {
 // markers do not occupy a slot and are tracked per (area, causing player).
 enum WoundArea : int { kWoundAura = 0, kWoundFlare = 1, kWoundLife = 2 };
 
-// Waku (26-Innealra 惑) is another per-player crystal zone holding 樱花结晶.
-enum class AreaKind { Life, Aura, Flare, Distance, Dust, Card, Market, Waku };
+// 区域（what.md 第 1 条）：樱花结晶与异樱存在与移动的全部场所。
+// 每玩家: Life/Aura/Flare/Market/Waku/Soil/Steam*；共享: Distance/Dust/External；
+// Card 携带具体牌实例（付与上的献 / 切札付与 / 视作装的结晶）。
+//   Soil            19-Megumi 土壤（Seed/Plant token 的家）
+//   SteamEngine     11-Thallya 引擎模块（Steam token）
+//   SteamExhausted  11-Thallya 用尽模块（Steam token）
+//   SteamOnDist     蒸汽放在距上（每枚有效距离 +1）
+//   SteamOnCrystal  蒸汽放在距的结晶上（每枚有效距离 -1）
+//   External        游戏外（结晶的引入/移出经此记账，守恒审计用）
+enum class AreaKind {
+  Life, Aura, Flare, Distance, Dust, Card, Market, Waku,
+  Soil, SteamEngine, SteamExhausted, SteamOnDist, SteamOnCrystal, External
+};
 
-// Reference to a crystal container. Field areas (Distance/Dust) ignore p; Card
-// areas refer to the crystals sitting on a specific enhancement instance.
-// Market (23-Akina 股市) is a per-player crystal zone holding 樱花结晶.
+// Reference to a token container. Field areas (Distance/Dust/External) ignore
+// p; Card areas refer to the crystals sitting on a specific card instance.
+// `by` is only meaningful for Wound tokens: the player who caused them.
 struct AreaRef {
   AreaKind kind = AreaKind::Dust;
   Player p = P0;
   int inst = -1;
+  Player by = P0;  // Wound 专用：施加者
 
   static AreaRef life(Player p) { return {AreaKind::Life, p, -1}; }
   static AreaRef aura(Player p) { return {AreaKind::Aura, p, -1}; }
@@ -152,6 +164,16 @@ struct AreaRef {
   static AreaRef card(int inst) { return {AreaKind::Card, P0, inst}; }
   static AreaRef market(Player p) { return {AreaKind::Market, p, -1}; }
   static AreaRef waku(Player p) { return {AreaKind::Waku, p, -1}; }  // 26-Innealra 惑
+  static AreaRef soil(Player p) { return {AreaKind::Soil, p, -1}; }  // 19-Megumi 土壤
+  static AreaRef steam_engine(Player p) { return {AreaKind::SteamEngine, p, -1}; }
+  static AreaRef steam_exhausted(Player p) { return {AreaKind::SteamExhausted, p, -1}; }
+  static AreaRef external() { return {AreaKind::External, P0, -1}; }
+  // 裂伤：target 的 area 区域中由 source 造成的裂伤。
+  static AreaRef wound(AreaKind area, Player target, Player source) {
+    AreaRef a{area, target, -1};
+    a.by = source;
+    return a;
+  }
 };
 
 enum class BasicAction { Advance, Retreat, Aura, Flare, Escape };

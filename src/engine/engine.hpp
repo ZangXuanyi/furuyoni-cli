@@ -10,6 +10,7 @@
 
 #include "engine/card_names.hpp"
 #include "core/state.hpp"
+#include "core/tokens.hpp"
 #include "core/types.hpp"
 #include "protocol/agent.hpp"
 
@@ -177,6 +178,21 @@ class Engine {
   void add_crystals(AreaRef a, int n);
   // cardEffect==false for basic actions (迷烟 only negates card effects).
   int move_crystals(AreaRef from, AreaRef to, int n, bool cardEffect = true);
+
+  // ---- 统一 Token 系统（what.md 第 1 条；实现见 src/engine/tokens.cpp）-------
+  // 区域内某类 token 的数量（Sakura 即原 amount）。
+  int token_amount(const AreaRef& a, Token kind = Token::Sakura) const;
+  // 无对端的增减：某区域直接 +/- n 个 token（含守恒审计与区域事件）。
+  // add_crystals == token_adjust(a, Sakura, n)。
+  void token_adjust(const AreaRef& a, Token kind, int n);
+  // 唯一移动入口：容量（装含冰晶占位/命上限）、重定向（血飞沫/脆弱意志/迷烟/
+  // 萨利亚的杰作/终结之果实）、守恒（External 记账）、事件（aura/distance/
+  // armor_full）、戏剧计数都集中在此。move_crystals == token_move(樱花)。
+  // 返回实际移动数。
+  int token_move(const MoveReq& m);
+  // 付与的纳支付：从 距/命/虚/装 依序组合取至多 nagi 个结晶到牌上（提示流程
+  // 内聚；notes=false 保持旧例——不计入《樱花》《明转》）。返回放到牌上的数量。
+  int pay_nagi(Player p, int inst);
 
   void draw(Player p, int n);
   void gain_vigor(Player p, int n);
@@ -627,7 +643,7 @@ class Engine {
   void note_generated_attack(Player p) { generatedAttacks_[p] += 1; }
   bool can_upgrade(int inst) const;   // 完全态: 这张牌有升级版
   bool upgrade_card(int inst);        // 完全态: 就地升级（保留所在区域）
-  void thaw(Player p, int n) { ps(p).ice = std::max(0, ps(p).ice - n); }
+  void thaw(Player p, int n) { token_adjust(AreaRef::aura(p), Token::Ice, -n); }
   int ice_count(Player p) const { return ps(p).ice; }
   void redirect_damage_to_card(int inst) { pendingDamageToCard_ = inst; }
   // 22-Renri 铭镌之衣: 「使用后」光环可以是动态的（视作夙愿时才免疫伤害），
@@ -693,6 +709,13 @@ class Engine {
   Attack* currentResponding = nullptr;
 
  private:
+  // token_move 的内部分发（实现见 tokens.cpp）。
+  int move_sakura(const MoveReq& m);            // 一般移动（原 move_crystals 策略）
+  int move_from_external(const MoveReq& m);     // 游戏外 → 区域（原 gain_external）
+  int move_to_external(const MoveReq& m);       // 区域 → 游戏外（原 lose_external）
+  int move_from_card(const MoveReq& m);         // 牌上结晶移除 + 入位
+  int move_special_token(const MoveReq& m);     // 异樱（蒸汽/冰晶/种子/植株/绿晶/裂伤）
+
   std::unique_ptr<EffectHost> effects_;
   Agent* agents_[2] = {nullptr, nullptr};
   bool mainDirty_ = false;

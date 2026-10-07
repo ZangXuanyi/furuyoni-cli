@@ -19,6 +19,7 @@ add_library(furuyoni
   src/engine/engine_content.cpp
   src/engine/engine_observe.cpp
   src/engine/engine_setup.cpp
+  src/engine/tokens.cpp
   src/engine/effect_host.cpp
   src/protocol/agent.cpp
 )
