@@ -84,7 +84,7 @@ return {
         if not ctx:is_attack(inst) then pool[#pool + 1] = inst end
       end
       if #pool == 0 then
-        ctx:reveal_hand(opp)
+        ctx:reveal_cards(ctx:player(), opp, "hand")
       else
         local sel = ctx:choose_cards_for(opp, "弃 1 张非攻击牌", pool, 1, 1)
         for _, inst in ipairs(sel) do ctx:discard_card(inst) end

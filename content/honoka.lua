@@ -424,11 +424,9 @@ return {
       local opp = ctx:opp()
       local side = ctx:last_attack_side()
       if side == 1 then
-        local hand = ctx:hand(opp)
-        if #hand > 0 then
-          local sel = ctx:choose_cards("影之两手：检视对手手牌并弃置其中一张", hand, 1, 1)
-          for _, i in ipairs(sel) do ctx:discard_card(i) end
-        end
+        local sel = ctx:reveal_cards(ctx:player(), opp, "hand",
+                                     "影之两手：检视对手手牌并弃置其中一张", 1, 1)
+        for _, i in ipairs(sel) do ctx:discard_card(i) end
       elseif side == 2 then
         ctx:move("flare", "dust", 2, opp, opp)
       end

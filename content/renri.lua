@@ -182,14 +182,11 @@ return {
     cost = 4, response = true, response_only = true,
     on_play = function(ctx)
       local me, opp = ctx:player(), ctx:opp()
-      local pool = {}
-      for _, i in ipairs(ctx:hand(opp)) do
-        if not ctx:card_is_goddess(i, "renri") and not ctx:is_full_power(i) then
-          pool[#pool + 1] = i
-        end
-      end
-      if #pool == 0 then return end
-      local sel = ctx:choose_cards("立睖凌厉：查看对手手牌并选择一张", pool, 1, 1)
+      local sel = ctx:reveal_cards(me, opp, "hand", "立睖凌厉：检视对手手牌并选择一张", 1, 1,
+                                   function(c2, i)
+                                     return not c2:card_is_goddess(i, "renri") and
+                                            not c2:is_full_power(i)
+                                   end)
       if #sel == 0 then return end
       local card = sel[1]
       local opts = {}

@@ -56,12 +56,10 @@ return {
   { set = "shinra", form = "O", num = 4, name = "引用", kind = "normal", type = "action",
     on_play = function(ctx)
       local opp = ctx:opp()
-      local pool = {}
-      for _, i in ipairs(ctx:hand(opp)) do
-        if ctx:is_attack(i) and ctx:opponent_pickable(i) then pool[#pool + 1] = i end
-      end
-      if #pool == 0 then return end
-      local sel = ctx:choose_cards("引用：选择对手一张攻击牌", pool, 1, 1)
+      local sel = ctx:reveal_cards(ctx:player(), opp, "hand", "引用：检视对手手牌，选择一张攻击牌", 1, 1,
+                                   function(c2, i)
+                                     return c2:is_attack(i) and c2:opponent_pickable(i)
+                                   end)
       if #sel == 0 then return end
       local card = sel[1]
       local c = ctx:choose("引用", { "使用之", "盖伏之", "什么都不做" })

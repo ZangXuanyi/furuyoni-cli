@@ -17,10 +17,7 @@ return {
     attack = { range = {2, 2}, damage = { aura = 2, life = 1 }, keywords = { "unrespondable" } },
     on_attack_after = function(ctx)
       if not ctx:from_cover() then return end
-      local opp = ctx:opp()
-      local hand = ctx:hand(opp)
-      if #hand == 0 then return end
-      local sel = ctx:choose_cards_for(ctx:player(), "检视对手手牌并盖伏一张", hand, 1, 1)
+      local sel = ctx:reveal_cards(ctx:player(), ctx:opp(), "hand", "影菱：检视对手手牌并盖伏一张", 1, 1)
       for _, inst in ipairs(sel) do ctx:cover_card(inst) end
     end },
 

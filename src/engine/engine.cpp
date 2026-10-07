@@ -243,10 +243,6 @@ void Engine::move_card_bottom(int inst) {
   ps(c.holder).deck.insert(ps(c.holder).deck.begin(), inst);  // bottom == front
 }
 
-void Engine::reveal_hand(Player p) {
-  (void)p;  // 显式空操作：公开信息随观察接口按需可见，无状态变化。
-}
-
 int Engine::amount(AreaRef a) const {
   // 统一 Token 入口：樱花计数走 token_amount（土壤/蒸汽区无樱花，返回 0）。
   return token_amount(a, Token::Sakura);
@@ -1539,7 +1535,6 @@ void Engine::play_turn(Player p) {
     didBasicThisTurn_[i] = false;
     rebuiltThisTurn_[i] = false;
     usedFullPowerThisTurn_[i] = false;
-    revealOppSpecials_[i] = false;
     // 18-Mizuki: 兵舍/阵地/对应的每回合计数
     ps(pl).distChanged = false;
     ps(pl).respondedThisTurn = false;

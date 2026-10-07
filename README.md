@@ -95,6 +95,8 @@ content     每套卡组一个 Lua 模块（数据 + 行为）
 // 引擎 -> 智能体
 {
   "kind": "main",                 // main | option | cards | damage | response | build | mulligan
+                                  // reveal = 零选择信息请求（对手瞬时公开手牌/切牌；
+                                  //   携带牌面数据，agent 回空选择即可）
   "prompt": "main phase action",
   "player": 0,
   "minSelect": 1, "maxSelect": 1,
@@ -209,6 +211,7 @@ Phase 3 新增字段与 API：
 | **Lua 钩子 `on_expand`** | `on_enter` 与 `on_expanded` 合并为单一钩子 `on_expand`（26 个内容模块已全部迁移） |
 | **状态哈希算法** | `state_hash` 摘要内容随内部重构变化（伤害路由全局已参数化为 `DamageRoute`、机制能力位 `mech` 入摘要等）；旧 replay 文件不可回放 |
 | **内部架构** | `src/engine/tokens.cpp`（结晶/异樱唯一移动入口 `token_move`/`token_adjust`）、`src/engine/pipeline.cpp`（命名阶段的结算管线 + `PlayFrame` 结算栈帧）、`src/engine/mechanics/`（女神机制各归其源文件：steam/ice/wound/market 已迁入，其余按同模式迁移中）、`src/engine/effect_ctx.hpp`（Lua 绑定共享层） |
+| **公开/检视统一（2026-10-07 裁定）** | `ctx:reveal_cards(viewer, owner, zone, prompt?, mn?, mx?, filter?)` 取代 `ctx:reveal_hand`（空操作，已删除）与 `ctx:reveal_opponent_cuts`（持久公开，语义错误已删除——切牌列表可被 20-O-S4 扩充，持久知识会过期）。瞬时信息：纯公开走零选择 `reveal` 请求；检视+选择一次 `cards` 请求完成。协议新增 `reveal` 请求种类 |
 
 ## 5. 规则裁定
 

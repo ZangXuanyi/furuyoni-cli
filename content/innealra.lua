@@ -394,7 +394,7 @@ return {
           local sel = ctx:choose_cards("怨艾：弃置一张对应牌", pool, 1, 1)
           for _, i in ipairs(sel) do ctx:discard_card(i) end
         else
-          ctx:reveal_hand(me)
+          ctx:reveal_cards(ctx:opp(), me, "hand")
         end
       end
       if ctx:fates_entangled() and ctx:used_normal_this_turn(me) == 0 then

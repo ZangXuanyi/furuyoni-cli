@@ -39,9 +39,8 @@ return {
     attack = { range = { 4, 7 }, damage = { aura = 1, life = 2 } },
     on_attack_after = function(ctx)
       if ctx:last_attack_side() ~= 1 then return end  -- 对手选择以装承伤
-      local hand = ctx:hand(ctx:opp())
-      if #hand == 0 then return end
-      local sel = ctx:choose_cards("黑之波动：检视对手手牌并弃置一张", hand, 1, 1)
+      local sel = ctx:reveal_cards(ctx:player(), ctx:opp(), "hand", "黑之波动：检视对手手牌并弃置一张", 1, 1)
+      if #sel == 0 then return end
       for _, i in ipairs(sel) do ctx:discard_card(i) end
     end },
 

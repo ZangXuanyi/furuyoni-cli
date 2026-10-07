@@ -93,12 +93,9 @@ return {
       local col = ctx:node_color()
       if col ~= "purple" and col ~= "green" then return end
       local o = ctx:opp()
-      local hand = ctx:hand(o)
-      if #hand > 0 then
-        ctx:reveal_hand(o)
-        local picks = ctx:choose_cards("打光：选择对手一张手牌放到其牌库底", hand, 1, 1)
-        if #picks > 0 then ctx:to_deck_bottom(picks[1]) end
-      end
+      local picks = ctx:reveal_cards(ctx:player(), o, "hand",
+                                     "打光：检视对手手牌，选 1 张放到其牌库底", 1, 1)
+      if #picks > 0 then ctx:to_deck_bottom(picks[1]) end
       ctx:gain_vigor(o, 1)
     end },
 
@@ -207,11 +204,14 @@ return {
     kind = "special", type = "action", cost = 2,
     on_play = function(ctx)
       local me = ctx:player()
+      local opp = ctx:opp()
       local hand = ctx:hand(me)
       if #hand > 0 then
         local picks = ctx:choose_cards("知音难觅：展示一张手牌并移出游戏", hand, 1, 1)
         if #picks > 0 then
-          ctx:reveal_hand(me)
+          -- 展示选定的那张牌给对手（瞬时公开；filter 限定只公开这一张）。
+          ctx:reveal_cards(opp, me, "hand", nil, nil, nil,
+                           function(_, i) return i == picks[1] end)
           ctx:remove_from_game(picks[1])
         end
       end

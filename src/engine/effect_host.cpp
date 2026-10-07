@@ -1,5 +1,6 @@
 #include "engine/effect_host.hpp"
 #include "engine/effect_ctx.hpp"
+#include "engine/engine_internal.hpp"  // detail::card_label / card_json
 
 #include <algorithm>
 #include <cstdio>
@@ -389,7 +390,6 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["to_deck_top"] = [](LuaCtx& c, int inst) { c.e->move_card_top(inst); };
   ctx["to_deck_bottom"] = [](LuaCtx& c, int inst) { c.e->move_card_bottom(inst); };
   ctx["discard_card"] = [](LuaCtx& c, int inst) { c.e->move_card(inst, Zone::Discard); };
-  ctx["reveal_hand"] = [](LuaCtx& c, int p) { c.e->reveal_hand(static_cast<Player>(p)); };
   // 特化命名操作（what.md 第 1 条）：装伤 = 装结晶进虚（先耗"视作装"的牌上结晶）；
   // 命伤 = 命结晶进自气（可触发破绽/即再起/死亡检查）。
   ctx["aura_damage"] = [](LuaCtx& c, int p, int n) {
@@ -476,6 +476,67 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["choose_cards_for"] = [choose_cards_impl](LuaCtx& c, int p, std::string prompt, sol::table insts,
                                                 int mn, int mx) {
     return choose_cards_impl(*c.e, static_cast<Player>(p), prompt, insts, mn, mx);
+  };
+  // 统一信息原语（2026-10-07 裁定：公开/检视为同一接口的两种用法，均为**瞬时**——
+  // 信息经请求送达查看方与决策日志；观测接口始终按观看者过滤，无持续公开状态。
+  //   ctx:reveal_cards(viewer, owner, zone)                          纯公开
+  //   ctx:reveal_cards(viewer, owner, zone, prompt, mn, mx[, fn])   检视+选择
+  // zone: "hand"（手牌）/ "cuts"（owner 的未使用切牌）。filter: function(ctx, inst)->bool。
+  // 无选择形态发 kind="reveal" 的零选择信息请求（minSel=0）；选择形态一次 cards
+  // 请求同时完成公开与选择。返回（选中的）实例列表。
+  ctx["reveal_cards"] = [](LuaCtx& c, int viewer, int owner, std::string zone,
+                           sol::optional<std::string> prompt, sol::optional<int> mn,
+                           sol::optional<int> mx, sol::optional<sol::function> filter) {
+    Player o = static_cast<Player>(owner);
+    std::vector<int> ids;
+    if (zone == "cuts") {
+      for (int i : c.e->special_cards(o))
+        if (!c.e->is_used(i)) ids.push_back(i);
+    } else {  // "hand"
+      ids = c.e->ps(o).hand;
+    }
+    if (filter) {
+      std::vector<int> kept;
+      for (int i : ids) {
+        auto res = (*filter)(c, i);
+        if (res.valid() && res.template get<bool>()) kept.push_back(i);
+      }
+      ids = std::move(kept);
+    }
+    Request r;
+    if (!prompt) {
+      // 纯公开：零选择信息请求，牌面数据随选项送达查看方。
+      r.kind = "reveal";
+      r.prompt = (zone == "cuts" ? std::string("对手公开了切牌（瞬时）")
+                                 : std::string("对手公开了手牌（瞬时）"));
+      for (int id : ids) {
+        Option op;
+        op.label = detail::card_label(c.e->def_of(id));
+        op.data = detail::card_json(c.e->def_of(id));
+        op.data["inst"] = id;
+        r.options.push_back(op);
+      }
+      r.minSel = 0;
+      r.maxSel = 0;
+      if (!ids.empty()) c.e->decide(static_cast<Player>(viewer), std::move(r));
+      return ids;
+    }
+    // 检视+选择：选项构造与 choose_cards 一致（label=牌名, data={inst}）。
+    r.kind = "cards";
+    r.prompt = *prompt;
+    for (int id : ids) {
+      Option op;
+      op.label = c.e->def_of(id).name;
+      op.data = {{"inst", id}};
+      r.options.push_back(op);
+    }
+    r.minSel = mn ? *mn : 1;
+    r.maxSel = mx ? *mx : (mn ? *mn : 1);
+    Decision d = c.e->decide(static_cast<Player>(viewer), std::move(r));
+    std::vector<int> out;
+    for (int i : d.indices)
+      if (i >= 0 && i < static_cast<int>(ids.size())) out.push_back(ids[static_cast<size_t>(i)]);
+    return out;
   };
   // Ask *another* player to pick one / several options (收割, 重压, 魔食, 万象乖离残灭之影 …).
   auto choose_opts_impl = [](Engine& e, Player who, const std::string& prompt, sol::table opts,
@@ -864,9 +925,6 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["keisou_other"] = [](LuaCtx& c, std::string s) { return c.e->keisou(c.who, s, true); };
   ctx["card_colors_str"] = [](LuaCtx& c, int i) { return c.e->card_colors_str(i); };
   ctx["keisou_amount"] = [](LuaCtx& c, int base) { return c.e->keisou_amount(c.who, base); };
-  ctx["reveal_opponent_cuts"] = [](LuaCtx& c, int p) {
-    c.e->reveal_opponent_specials(static_cast<Player>(p));
-  };
   ctx["is_zenkai"] = [](LuaCtx& c, int i) { return c.e->def_of(i).zenkai; };
   ctx["play_hand_card"] = [](LuaCtx& c, int i) { c.e->play_hand_card(c.who, i); };
   ctx["guess"] = [](LuaCtx& c, int inst) { return c.e->guess_name(c.who, inst); };

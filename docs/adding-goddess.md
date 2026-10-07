@@ -86,6 +86,16 @@ ctx:attack{ range=…, damage=…, after=function(c2,a) … end }   -- 衍生攻
 **决策（对智能体提问）**：`ctx:choose(prompt, {"选项A","选项B"})`（返回 1 基序号）、
 `ctx:choose_cards(prompt, list, min, max)`、`ctx:choose_cards_for(谁, ...)`（让对手选）。
 
+**公开/检视（统一信息原语，均为瞬时）**：
+```lua
+ctx:reveal_cards(viewer, owner, "hand")                        -- 纯公开：零选择信息请求
+ctx:reveal_cards(viewer, owner, "cuts")                        -- 公开对手未使用切牌
+ctx:reveal_cards(viewer, owner, "hand", prompt, 1, 1, filter)  -- 检视+选择：一次请求完成
+```
+"公开手牌"/"检视对手手牌，并～"是同一原语的两种用法：信息只经请求瞬时送达查看方
+（进入其决策日志），观测接口始终按观看者过滤——**没有持续公开状态**（手牌与切牌
+列表都会变化，持久公开的知识会过期）。展示特定的一张牌用 filter 限定范围。
+
 **付与**：`on_expand`（献落位后触发，可读最终献数；可自加结晶免于 0 献弃置）、
 `on_discard`（弃置时）、`continuous`（光环，见下）、`decay_to`（献离牌去向：
 `"dust"` 默认 / `"distance"` / `"enemy_flare"` / `"waku"`）。

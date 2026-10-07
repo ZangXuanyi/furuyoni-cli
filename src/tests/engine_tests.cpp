@@ -5895,3 +5895,115 @@ TEST_CASE("Lua 特化接口: ctx:aura_damage / ctx:life_damage 与引擎一致")
   CHECK(crystals_total(e) == 36);
   for (const std::string& v : check_invariants(e)) CHECK_MESSAGE(false, v);
 }
+
+// ---------------------------------------------------------------------------
+// 统一信息原语 reveal_cards（2026-10-07 裁定：公开/检视同一接口、瞬时）
+// ---------------------------------------------------------------------------
+
+namespace {
+// 记录引擎发出的每个请求（供信息型请求断言）。
+struct RecordingAgent : Agent {
+  std::vector<Request>* sink = nullptr;
+  Agent* inner = nullptr;
+  Decision decide(const Request& req) override {
+    if (sink) sink->push_back(req);
+    return inner ? inner->decide(req) : Decision{};
+  }
+};
+}  // namespace
+
+TEST_CASE("reveal_cards: 纯公开恰发一个零选择 reveal 请求，状态零变化") {
+  Config cfg = make_cfg("hajimari", 1);
+  Engine e(cfg);
+  load_hajimari(e);
+  FirstAgent first;
+  RecordingAgent rec;  // P0 = 查看方
+  rec.inner = &first;
+  std::vector<Request> reqs;
+  rec.sink = &reqs;
+  e.set_agent(P0, &rec);
+  e.set_agent(P1, &first);
+  const char* src =
+      "return {{set='t', form='O', num=1, name='T', kind='normal', type='action',\n"
+      "        on_play=function(ctx) ctx:reveal_cards(ctx:player(), ctx:opp(), 'hand') end}}";
+  FILE* f = std::fopen("/tmp/fy_test_reveal.lua", "w");
+  std::fputs(src, f);
+  std::fclose(f);
+  e.load_content("/tmp/fy_test_reveal.lua");
+  int def = find_def(e, "t", "T");
+  REQUIRE(def >= 0);
+  // P1 手牌 3 张。
+  for (const char* nm : {"投射", "牵制", "潜行"}) {
+    int h = e.add_instance(find_def(e, "hajimari.ukiro", nm), P1);
+    e.move_card(h, Zone::Hand);
+  }
+  const int handN = static_cast<int>(e.ps(P1).hand.size());
+  int inst = e.add_instance(def, P0);
+  e.move_card(inst, Zone::Hand);
+  e.st.active = P0;
+  const int life0 = e.ps(P1).life, dust0 = e.st.dust;
+  e.play_card(P0, inst, false);
+  // 恰一个 kind="reveal" 请求发给查看方；选项数 = 公开方手牌数；零选择。
+  int reveals = 0;
+  for (const Request& r : reqs) {
+    if (r.kind == "reveal") {
+      reveals += 1;
+      CHECK(r.minSel == 0);
+      CHECK(r.maxSel == 0);
+      CHECK(r.options.size() == static_cast<size_t>(handN));
+    }
+  }
+  CHECK(reveals == 1);
+  // 状态零变化（除打出牌本身）。
+  CHECK(e.ps(P1).life == life0);
+  CHECK(e.st.dust == dust0);
+  CHECK(crystals_total(e) == 36);
+  for (const std::string& v : check_invariants(e)) CHECK_MESSAGE(false, v);
+}
+
+TEST_CASE("reveal_cards: 检视+选择形态与 choose_cards 等价；cuts 只含未使用切牌") {
+  Config cfg = make_cfg("hajimari", 1);
+  Engine e(cfg);
+  load_hajimari(e);
+  FirstAgent first;
+  e.set_agent(P0, &first);
+  e.set_agent(P1, &first);
+  const char* src =
+      "return {{set='t', form='O', num=1, name='T', kind='normal', type='action',\n"
+      "        on_play=function(ctx)\n"
+      "          local sel = ctx:reveal_cards(ctx:player(), ctx:opp(), 'hand',\n"
+      "                                       '检视并弃置一张', 1, 1,\n"
+      "                                       function(c2, i) return c2:is_attack(i) end)\n"
+      "          for _, i in ipairs(sel) do ctx:discard_card(i) end\n"
+      "          local cuts = ctx:reveal_cards(ctx:player(), ctx:opp(), 'cuts')\n"
+      "          ctx:store_int('cuts_n', #cuts)\n"
+      "        end}}";
+  FILE* f = std::fopen("/tmp/fy_test_reveal2.lua", "w");
+  std::fputs(src, f);
+  std::fclose(f);
+  e.load_content("/tmp/fy_test_reveal2.lua");
+  int def = find_def(e, "t", "T");
+  REQUIRE(def >= 0);
+  // P1 手牌：1 攻击 + 1 行动；P1 切牌：2 张（1 未使用 + 1 已使用）。
+  int atk = e.add_instance(find_def(e, "hajimari.ukiro", "投射"), P1);
+  int act = e.add_instance(find_def(e, "hajimari.ukiro", "潜行"), P1);
+  e.move_card(atk, Zone::Hand);
+  e.move_card(act, Zone::Hand);
+  int cutUnused = e.add_instance(find_def(e, "hajimari.ukiro", "强夺之棘"), P1);
+  e.move_card(cutUnused, Zone::Special);
+  e.ci(cutUnused).faceUp = false;
+  int cutUsed = e.add_instance(find_def(e, "hajimari.ukiro", "强夺之棘"), P1);
+  e.move_card(cutUsed, Zone::Special);
+  e.ci(cutUsed).faceUp = true;
+  int inst = e.add_instance(def, P0);
+  e.move_card(inst, Zone::Hand);
+  e.st.active = P0;
+  e.play_card(P0, inst, false);
+  // filter 生效：只有攻击牌可被选中（FirstAgent 选第一个）→ 进弃牌堆。
+  CHECK(e.ci(atk).zone == Zone::Discard);
+  CHECK(e.ci(act).zone == Zone::Hand);
+  // cuts 纯公开只含未使用切牌。
+  CHECK(e.load_int(inst, "cuts_n", -1) == 1);
+  CHECK(crystals_total(e) == 36);
+  for (const std::string& v : check_invariants(e)) CHECK_MESSAGE(false, v);
+}

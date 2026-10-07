@@ -328,7 +328,7 @@ uint64_t Engine::state_hash() const {
     putb(attackedThisTurn_[i]); putb(playedCentrifugalThisTurn_[i]);
     putb(playedLianchengThisTurn_[i]); putb(didBasicThisTurn_[i]);
     putb(rebuiltThisTurn_[i]); putb(usedFullPowerThisTurn_[i]);
-    putb(revealOppSpecials_[i]); putb(ashuraExtraUsed_[i]);
+    putb(ashuraExtraUsed_[i]);
     put(generatedAttacks_[i]); put(enemyLifeDamageFired_[i]); put(enemyAuraDamageFired_[i]);
     putb(lifeChangedThisTurn_);
     put(lifeChangeMaxThisTurn_);
@@ -459,7 +459,7 @@ nlohmann::json Engine::observation(Player v) const {
       const CardInstance& c = ci(inst);
       json e;
       e["owner"] = pi;
-      if (pi == static_cast<int>(v) || c.faceUp || revealOppSpecials_[v]) {
+      if (pi == static_cast<int>(v) || c.faceUp) {
         e["inst"] = inst;
         e["name"] = def_of(inst).name;
         e["used"] = c.faceUp;

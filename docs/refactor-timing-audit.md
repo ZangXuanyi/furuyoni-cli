@@ -111,3 +111,17 @@ memory + blocks 注册汇总；engine.cpp 3513→2165 行，effect_host.cpp 2011
 
 验证方法备忘：新旧引擎对照必须**在各源码树目录下运行**（content 按 cwd 解析）；
 hajimari 语料应 30/30 帧一致，standard 语料分歧应全部起于付与结算（Phase 2 审计表）。
+
+## 公开/检视统一（2026-10-07 裁定）
+
+- 裁定：公开/检视为**同一瞬时信息原语**；切牌检视不持久（20-O-S4 知音难觅会把
+  构筑未用切牌加入切牌区，切牌列表可变，持久知识会过期）。
+- 新接口 `ctx:reveal_cards(viewer, owner, zone, prompt?, mn?, mx?, filter?)`；
+  删除 `ctx:reveal_hand`（原空操作）与 `ctx:reveal_opponent_cuts`+`revealOppSpecials_`
+  （持久标志，语义错误）。
+- D5：协议新增 `kind="reveal"` 零选择信息请求（纯公开形态）；对手手牌/未使用切牌
+  从此在任何 observation 中都不可见（原 kururu 检视后持久可见）。
+- D6：最终搜寻（kururu A1-S3）的切牌查看从 on_play 开头移入计数=2 分支，
+  对齐 rules/10-kururu.md:28 卡面文本。
+- 验证：216/216 用例（含 2 个新钉死测试：纯公开请求形态/检视选择等价+cuts 过滤）、
+  600 局模糊、ASan 100 局全绿。

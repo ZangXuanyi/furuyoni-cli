@@ -215,15 +215,8 @@ return {
       -- 红红蓝蓝蓝绿绿：先检视对手全部切牌，可将一张直接设为已使用（不执行效果）。
       if ctx:keisou("RRBBBGG") then
         if ctx:choose("神涉装置：检视对手切牌并直接设为已使用？", { "是", "否" }) == 1 then
-          ctx:reveal_opponent_cuts(me)
-          local unused = {}
-          for _, i in ipairs(ctx:special_cards(opp)) do
-            if not ctx:is_used(i) then unused[#unused + 1] = i end
-          end
-          if #unused > 0 then
-            local sel = ctx:choose_cards("选择一张设为已使用", unused, 1, 1)
-            for _, i in ipairs(sel) do ctx:set_used(i) end
-          end
+          local sel = ctx:reveal_cards(me, opp, "cuts", "神涉装置：检视对手切牌，选择一张设为已使用", 1, 1)
+          for _, i in ipairs(sel) do ctx:set_used(i) end
         end
       end
       local pool = {}
@@ -288,7 +281,7 @@ return {
   { set = "kururu.A1", form = "A1", num = 3, name = "最终搜寻", kind = "special", type = "action",
     cost = 2,
     on_play = function(ctx)
-      ctx:reveal_opponent_cuts(ctx:player())  -- 先查看对手切牌（可偷取）
+      local me = ctx:player()
       local opp = ctx:opp()
       local target = -1
       local cov = ctx:cover_cards(opp)
@@ -305,6 +298,7 @@ return {
         local c = ctx:load_int("count", 0) + 1
         ctx:store_int("count", c)
         if c >= 2 then
+          ctx:reveal_cards(me, opp, "cuts")  -- 查看对手的切牌（卡面：计数为 2 时）
           local who = ctx:choose("最终搜寻：加入哪一方的未选用切牌？", { "你的", "对手的" })
           ctx:add_unused_cuts(who == 1 and ctx:player() or ctx:opp())
           local e = ctx:gain_extra("壮绝旅程")

@@ -83,7 +83,7 @@ return {
         local sel = ctx:choose_cards_for(opp, "旋翎疑矢：弃置一张攻击牌", pool, 1, 1)
         for _, i in ipairs(sel) do ctx:discard_card(i) end
       else
-        ctx:reveal_hand(opp)
+        ctx:reveal_cards(ctx:player(), opp, "hand")
         for _ = 1, 3 do ctx:cover_top(opp) end
       end
     end },

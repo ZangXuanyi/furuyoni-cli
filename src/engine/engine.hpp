@@ -215,10 +215,6 @@ class Engine {
   [[deprecated("use token_move / Engine::move")]] int move_crystals(AreaRef from, AreaRef to,
                                                                     int n, bool cardEffect = true);
 
-  // 公开手牌：无持续机械影响（观察是按观看者过滤拉取的）；保留给卡面文本
-  // 「公开手牌」调用（misora/tokoyo/innealra）。
-  void reveal_hand(Player p);
-
   // ---- 统一 Token 系统（what.md 第 1 条；实现见 src/engine/tokens.cpp）-------
   // 内部快捷方式（机制模块/管线的推荐写法）：直连统一入口。
   int move(const AreaRef& from, const AreaRef& to, int n, bool cardEffect = true) {
@@ -713,7 +709,6 @@ class Engine {
   std::string card_colors_str(int inst) const;
   bool keisou(Player p, const std::string& combo, bool otherOnly = false) const;
   int keisou_amount(Player p, int base);  // 骇客装置: double one 机巧 slot's numbers
-  void reveal_opponent_specials(Player p) { revealOppSpecials_[p] = true; }
   void play_hand_card(Player p, int inst) { play_card(p, inst, false); }
   std::vector<std::string> goddess_normal_names(Player p) const;
   bool guess_name(Player guesser, int cardInst);  // 最终搜寻
@@ -839,7 +834,6 @@ class Engine {
   int pendingNagiAdjust_ = 0;
   bool ashuraExtraUsed_[2] = {false, false};
   bool keisouDoubled_ = false;
-  bool revealOppSpecials_[2] = {false, false};
   bool forceUnrespondable_ = false;
   int externalAdded_ = 0;
   // ---- 26-Innealra 诺伦: 瞬态结算状态 ---------------------------------------
