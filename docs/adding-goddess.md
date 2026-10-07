@@ -33,9 +33,34 @@ costStage(切牌费/额外费) → declareStage(声明期锁定/伪证) → inte
   抽象表达，禁止绕过 ctx 直接改引擎内部状态。
 - **机制框架**（蒸汽/冰晶/土壤/裂伤/股市/命运槽/戏剧/……）= C++ 的
   `src/engine/mechanics/<名字>.cpp`，各自注册自己的 ctx API 块。若你的女神
-  引入**全新种类的区域/指示物/子流程**，才需要新开一个机制文件（见第 4 节）。
+  引入**全新种类的区域/指示物/子流程**，才需要新开一个机制文件（见第 5 节）。
 
-## 1. 最小女神：7 常规 + 4 切牌
+## 1. 卡牌字段速查
+
+| 字段 | 说明 |
+|---|---|
+| `set` / `form` / `num` | 女神 id（`"mygirl"`）、形态（`"O"`/`"A1"`/`"A2"`）、组内序号（常规 1..7、切札 1..4；异相同 `num` 覆盖）|
+| `name` | 牌名 |
+| `kind` | `normal`（常规）/ `special`（切札）|
+| `type` | `attack` / `action` / `enhance` |
+| `cost` | 切札耗能（静态或 `function(ctx)` 动态）|
+| `nagi` | 付与「纳 X」（静态或动态）|
+| `full_power` / `response` / `breakable` / `terminal` | 全力 / 对应 / 破绽 / 终端（`break` 是 Lua 关键字，故 `breakable`）|
+| `attack` | `{ range = {lo,hi} 或 {{lo,hi},…} 或函数, damage = { aura = n\|fn\|nil, life = n\|fn\|nil }, keywords = {"unrespondable","lock","overwhelm","both_sides",…} }`，整体可为函数（**声明时求值并锁定**）|
+| `on_play` / `on_expand` / `on_discard` / `on_attack_after` / `on_use_after` / `on_declare` / `on_transform` / `on_fate` / `on_death` | 行为钩子（`on_expand` 在献落位后触发）|
+| `continuous` | `{ { when="expanded"\|"used"\|"always", query="attack"\|"cost", replace=bool, apply=function(ctx, atk\|cost) } }` 光环（数值替换先于增减）|
+| `triggers` | `{ { event="…", zone="hand"\|"discard"\|缺省=场上, cond=function(ctx,ev), run=function(ctx,ev) } }` |
+| `reset` | `{ kind="end_turn"\|"immediate", cond=function(ctx) …, at_least=n, on="事件名" }` 再起/即再起 |
+| `playable` / `respond` | `function(ctx)` 谓词：主阶段可否打出 / 能否当对应打出（识破类）|
+| `decay_to` | 献离牌去向：`"dust"`(默认)/`"distance"`/`"enemy_flare"`/`"waku"` |
+| `armor_as_crystals` / `lock_distance` / `aura_max` / `limit_distance={lo,hi}` | 常用规则位（详见既有模块与 `core/state.hpp` 的 CardDef）|
+
+攻击句柄（`atk`）：`add{aura=,life=}` `negate()` `keyword(s)` `extend_far/near(n)`
+`shrink_far/near(n)` `no_aura_damage()/no_life_damage()` `both_sides()`
+`attacker()` `from_normal()/from_special()` `source_inst()/source_is_goddess(g)`
+`contains(d)` 等。事件对象（`ev`）：`type() subject() first() card() attacker() attack()`。
+
+## 2. 最小女神：7 常规 + 4 切牌
 
 复制 `src/tests/fixtures/custom_goddess.lua` 起步。要点：
 
@@ -63,7 +88,7 @@ return {
 把文件放进 `content/`，并在 `content/packs.json` 的 `custom` 数组里加文件名
 （或用 `--content-dir content:custom` 直载）。
 
-## 2. ctx 速查（写牌面效果只用这些）
+## 3. ctx 速查（写牌面效果只用这些）
 
 完整清单以 `src/engine/effect_host.cpp` 与 `src/engine/mechanics/*.cpp` 为准
 （每个机制文件注册自己的那一段）；下面是日常 90% 的部分。
@@ -134,7 +159,7 @@ end
 **切牌再起**：`reset = { kind = "end_turn", cond = function(ctx) ... end }`
 或 `kind = "immediate"`（即再起）；事件驱动加 `on = "<事件名>"`。
 
-## 3. 常见坑（都真实踩过）
+## 4. 常见坑（都真实踩过）
 
 1. **结晶守恒**：双方命+气+装+距+虚+牌上结晶恒等于 36。永远用 `ctx:move`
    系列，不要想"直接扣数字"——引擎的不变式检查（fuzz）会当场抓住。
@@ -149,7 +174,7 @@ end
 7. 改完必跑 `ctest`；语义拿不准时查 `docs/rulings.md`（唯一权威裁定），
    再不行读 `rules/` 对应女神的卡面。
 
-## 4. 什么时候要动 C++（新机制）
+## 5. 什么时候要动 C++（新机制）
 
 只有当你的女神引入**新的状态容器或子流程**（如新的区域、指示物种类、独立
 的回合外流程）时才写 C++。参照现有模式，三步：
@@ -165,7 +190,7 @@ end
 或等结构化 visitor 落地后自动覆盖）。异樱类指示物请走 Token 模型
 （`core/tokens.hpp` 的 `Token` + `tokens.cpp` 的异樱分支），不要另起炉灶。
 
-## 5. 测试怎么写
+## 6. 测试怎么写
 
 - 数据审计：`src/tests/rules_matrix_tests.cpp` 校验 `rules/*.md` 与内容一致，
   新女神记得补条目。
@@ -174,4 +199,8 @@ end
 - 冒烟：`--goddesses <id> --random --random --seed N` 自战若干局，
   `strictLua`（默认开）下任何 Lua 错误都会直接炸出来。
 
-祝顺利。有疑问时，`grep -rn "ctx\[\"" src/engine/` 永远是最诚实的 API 文档。
+祝顺利。有疑问时，`grep -rn "ctx\[\"" src/engine/` 永远是最诚实的 API 文档；
+语义拿不准查 [`docs/rulings.md`](rulings.md)（唯一权威），再不行读 `rules/` 卡面。
+
+相关文档：[运行与评测](running.md) · [智能体协议](agent-protocol.md) ·
+[架构](architecture.md) · [测试](testing.md) · [内容模块系统](content-modules.md)。

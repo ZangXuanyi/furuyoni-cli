@@ -718,6 +718,10 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     int v = n < 0 ? 0 : (n > 2 ? 2 : n);
     c.e->ps(static_cast<Player>(p)).vigor = v;
   };
+  // flare_to：「气设为 X」类卡面（娜迦：敌气设为 2 多余移虚；下限 0）。
+  ctx["flare_to"] = [](LuaCtx& c, int p, int n) {
+    c.e->ps(static_cast<Player>(p)).flare = n < 0 ? 0 : n;
+  };
   ctx["cower"] = [](LuaCtx& c, int p) { c.e->give_cower(static_cast<Player>(p)); };
   ctx["lose_life"] = [](LuaCtx& c, int p, int n, sol::optional<std::string> to) {
     AreaKind k = AreaKind::Flare;
@@ -968,9 +972,7 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["add_unused_cuts"] = [](LuaCtx& c, int p) {
     c.e->add_unused_cuts(static_cast<Player>(p));
   };
-  ctx["set_flare"] = [](LuaCtx& c, int p, int n) {
-    c.e->ps(static_cast<Player>(p)).flare = n < 0 ? 0 : n;
-  };
+
   ctx["random_index"] = [](LuaCtx& c, int n) { return c.e->rng_below(n); };
   ctx["choose_options"] = [](LuaCtx& c, std::string prompt, sol::table opts, int mn, int mx) {
     Request r;

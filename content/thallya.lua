@@ -113,7 +113,7 @@ return {
     on_transform = function(ctx)
       local f = ctx:flare(ctx:opp())
       if f > 2 then
-        ctx:set_flare(ctx:opp(), 2)
+        ctx:flare_to(ctx:opp(), 2)
         ctx:add_crystal("dust", f - 2)
       end
     end,

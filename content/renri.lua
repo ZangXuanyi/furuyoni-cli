@@ -364,7 +364,7 @@ return {
     triggers = {
       { event = "removed_from_game",
         cond = function(ctx, ev) return ev:card() == ctx:source_inst() end,
-        run = function(ctx, ev) ctx:set_flare(ctx:opp(), 0) end },
+        run = function(ctx, ev) ctx:flare_to(ctx:opp(), 0) end },
     } },
 
   -- A1-EX-N3 最初的樱花: 回归。执行一次基本动作；若你用这张牌伪证且未被质疑，

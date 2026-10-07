@@ -1,4 +1,41 @@
-# 付与结算顺序变更审计（重构工作文档）
+# 2026-10 大重构日志（按 what.md）
+
+权威顺序：what.md > docs/rulings.md > 代码现状；一切破坏性变更允许，全部记录于下。
+
+## 破坏性变更总表（旧 replay/状态哈希一律失效）
+
+| 变更 | 说明 |
+|---|---|
+| **付与结算顺序** | 打出付与：种植 → 给献（纳支付）→ **展开时** → 0 献弃置。展开时在献落位后触发、可读最终献数；旧序「展开时→放献」废止（裁定修订，见 rulings #4） |
+| **Lua 钩子 `on_expand`** | `on_enter` 与 `on_expanded` 合并为单一钩子 `on_expand`（26 个内容模块全部迁移） |
+| **状态哈希算法** | 摘要内容随内部重构变化（DamageRoute 参数化、能力位 mech、dramaMarked 等）；旧 replay 不可回放 |
+| **公开/检视统一** | `ctx:reveal_cards(viewer, owner, zone, prompt?, mn?, mx?, filter?)` 取代 `ctx:reveal_hand`（空操作，已删）与 `ctx:reveal_opponent_cuts`（持久公开，语义错误已删——切牌列表可被 20-O-S4 扩充）。瞬时信息：纯公开走零选择 `reveal` 请求；协议新增 `reveal` 种类 |
+| **死亡判定优先级** | 特胜特败 → 赖着不死 → 复活；诅咒特败与戏剧特胜无视复活（`dramaMarked_`） |
+| **Lua API v2** | 删除裸写入器 `set_vigor`/`set_flare`（→ `cost_vigor`/`vigor_to`/`flare_to`）；新增 `self_boost`/`reveal_cards`/`aura_damage`/`life_damage`；旧结晶入口 `move_crystals`/`add_crystals`/`amount` 标 [[deprecated]] |
+| **内部架构** | tokens.cpp（结晶/异樱唯一入口）、pipeline.cpp（命名阶段 + PlayFrame）、mechanics/（16 机制各归其文件）、effect_ctx.hpp（绑定共享层）、MechanicBit 能力注册表取代女神名前缀匹配 |
+
+## 交付状态（2026-10-07 收官）
+
+Phase 1（Token 系统）、Phase 2（结算管线+付与新顺序）、Phase 3（16 机制拆分+
+能力注册表+弃用清理）、公开/检视统一、死亡优先级、Lua v2（裸写入器全清+惯用形
+上收+内容 API 审计）均已落地。基线：223/223 用例（含死亡矩阵/付与顺序/reveal/
+API 审计钉死测试）+ 600 局模糊 + ASan。
+
+## 尚余（后续）
+
+1. PlayerState/CardDef 重组为通用字段+每机制子结构；state_hash/observation/
+   full_state_json 改为按机制注册的结构化 visitor（消灭四处手同步）。
+2. card_names.hpp 消解：引擎侧 `has_named_active` 逐个改为 CardDef 能力位
+   （由 Lua 数据声明）；drama 六条件数据化。
+3. Lua v2 余项：交互式移动菜单的 choose_move 惯用形、responded_is_plain
+   小工具（4 处轻微重复）；`set_algorithm`/`raira_gain`/`set_slot` 等
+   机制专属写入器随各自 mechanics 文件继续收编。
+
+---
+
+以下为过程记录（裁定、差异审计、验证方法），保留备查。
+
+## 过程记录 A：付与结算顺序变更审计
 
 **裁定**（用户 2026-10-07）：以 `what.md` 字面为准——付与打出效果结算顺序为
 **种植 → 给献（纳支付）→ 展开时 → 0 献立即弃置**。
