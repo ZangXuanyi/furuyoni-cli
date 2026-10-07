@@ -665,56 +665,6 @@ void Engine::run_rebuild(Player p) {
   rebuild(p, true);  // 1 life loss + shuffle
 }
 
-void Engine::do_electronic_setup(Player p) {
-  std::vector<int> cores, adds;
-  for (int inst : assembled_parts(p)) {
-    if (def_of(inst).corePart)
-      cores.push_back(inst);
-    else
-      adds.push_back(inst);
-  }
-  if (cores.empty()) return;
-
-  Request r;
-  r.kind = "option";
-  r.prompt = "电子设置：选择核心零件";
-  for (int inst : cores) r.options.push_back({def_of(inst).name, true, {}});
-  int c0 = ask_one(p, std::move(r));
-  c0 = std::min(c0, static_cast<int>(cores.size()) - 1);
-  int core = cores[static_cast<size_t>(c0)];
-
-  std::vector<int> chosenAdds;
-  if (!adds.empty()) {
-    Request ar;
-    ar.kind = "cards";
-    ar.prompt = "电子设置：选择任意数量的附加零件";
-    for (int inst : adds) {
-      Option o;
-      o.label = def_of(inst).name;
-      o.data = {{"inst", inst}};
-      ar.options.push_back(o);
-    }
-    ar.minSel = 0;
-    ar.maxSel = static_cast<int>(adds.size());
-    Decision d = decide(p, std::move(ar));
-    for (int i : d.indices)
-      if (i >= 0 && i < static_cast<int>(adds.size())) chosenAdds.push_back(adds[static_cast<size_t>(i)]);
-  }
-
-  Attack a = make_attack(p, core, false, true);
-  int n = static_cast<int>(chosenAdds.size());
-  for (int cp : chosenAdds) effects_->apply_part(*this, ci(cp).def, p, a, n, "apply");
-  resolve_attack(a);
-  if (a.hit) {
-    for (int cp : chosenAdds) effects_->apply_part(*this, ci(cp).def, p, a, n, "after");
-    // The core part's own 攻击后 text (e.g. 核心零件Z) must resolve too.
-    if (effects_->has(ci(core).def, "on_attack_after"))
-      effects_->call(*this, ci(core).def, "on_attack_after", p, core);
-  }
-  disassemble_part(p, core);
-  for (int cp : chosenAdds) disassemble_part(p, cp);
-  check_win();
-}
 
 std::string Engine::card_zone(int inst) const {
   if (inst >= 0 && inst < static_cast<int>(st.insts.size())) {
@@ -1058,89 +1008,14 @@ void Engine::fire_armor_full_if_new(Player p, int cause) {
 }
 
 
-int Engine::mirror(Player p) const {
-  const PlayerState& a = ps(p);
-  const PlayerState& b = ps(opp(p));
-  int n = 0;
-  if (a.aura == b.aura) n += 1;
-  if (a.flare == b.flare) n += 1;
-  if (a.life == b.life) n += 1;
-  return n;
-}
 
-void Engine::to_memory(int inst) {
-  // 扣置入回忆区：不结算弃置时效果，其上的樱花结晶移到虚。
-  if (card_crystal_count(inst) > 0) {
-    int sak = 0;
-    int n = card_crystal_count(inst);
-    take_card_crystals(inst, n, kTakeNormal, &sak);
-    if (sak > 0) decay_crystals(inst, sak);
-  }
-  move_card(inst, Zone::Memory);
-  ci(inst).faceUp = false;
-}
 
 int Engine::memory_size(Player p) const { return static_cast<int>(ps(p).memory.size()); }
 
-bool Engine::has_memory_draw(Player p) const {
-  for (int inst : ps(p).enhance)
-    if (def_of(inst).memoryDraw) return true;
-  for (int inst : ps(p).special)
-    if (ci(inst).faceUp && def_of(inst).memoryDraw) return true;
-  return false;
-}
 
-bool Engine::has_memory_shield(Player p) const {
-  for (int inst : ps(p).enhance)
-    if (def_of(inst).memoryRebuildShield) return true;
-  for (int inst : ps(p).special)
-    if (ci(inst).faceUp && def_of(inst).memoryRebuildShield) return true;
-  return false;
-}
 
-int Engine::memory_draw(Player p, int n) {
-  int got = 0;
-  for (int i = 0; i < n; ++i) {
-    if (ps(p).memory.empty()) break;
-    int inst = ps(p).memory.back();
-    move_card(inst, Zone::Hand);
-    ci(inst).faceUp = true;
-    got += 1;
-    // 使用后：八叶的牌从回忆区加入手牌时，可以选择将其升级。
-    if (has_memory_draw(p) && can_upgrade(inst)) {
-      Request r;
-      r.kind = "option";
-      r.prompt = "此目所及之物与世：将「" + def_of(inst).name + "」升级为完全态？";
-      r.options.push_back({"升级", true, {}});
-      r.options.push_back({"不升级", true, {}});
-      if (ask_one(p, std::move(r)) == 0) upgrade_card(inst);
-    }
-  }
-  return got;
-}
 
-void Engine::all_normals_to_memory(Player p, int except) {
-  std::vector<int> all;
-  auto add = [&](const std::vector<int>& v) { all.insert(all.end(), v.begin(), v.end()); };
-  add(ps(p).deck);
-  add(ps(p).hand);
-  add(ps(p).discard);
-  add(ps(p).cover);
-  add(ps(p).enhance);
-  for (int inst : all) {
-    if (def_of(inst).kind != CardKind::Normal) continue;
-    if (inst == except) continue;  // 旅途: 保留至多 1 张手牌
-    if (ci(inst).zone == Zone::Removed || ci(inst).zone == Zone::Memory) continue;
-    to_memory(inst);  // 不结算弃置时效果
-  }
-}
 
-int Engine::count_complete(Player p) const {
-  int n = 0;
-  for (const CardInstance& c : st.insts)
-    if (c.holder == p && def_of(c.inst).complete && c.zone != Zone::Removed) n += 1;
-  return n;
-}
 
 int Engine::lose_external(AreaRef a, int n) {
   MoveReq m;
@@ -1158,26 +1033,7 @@ bool Engine::reverse_moves_active(Player p) const {
   return false;
 }
 
-bool Engine::can_upgrade(int inst) const {
-  if (inst < 0) return false;
-  const CardDef& d = def_of(inst);
-  if (d.upgrade.empty()) return false;
-  for (const CardDef& t : defs)
-    if (t.name == d.upgrade && t.goddess == d.goddess) return true;
-  return false;
-}
 
-bool Engine::upgrade_card(int inst) {
-  if (!can_upgrade(inst)) return false;
-  const CardDef& d = def_of(inst);
-  for (const CardDef& t : defs)
-    if (t.name == d.upgrade && t.goddess == d.goddess) {
-      ci(inst).def = t.id;
-      fire("upgraded", ci(inst).holder, nullptr, inst, false);
-      return true;
-    }
-  return false;
-}
 
 bool Engine::has_enemy_no_flare(Player p) const {
   // p 的对手场上有 enemy_no_flare 的牌 → p 不能聚气（冻僵）。
@@ -1762,38 +1618,9 @@ void Engine::set_used(int inst) {
   if (ci(inst).zone == Zone::Special) ci(inst).faceUp = true;
 }
 
-void Engine::switch_weapon(Player p, int source) {
-  if (!ps(p).yukihi) return;
-  ps(p).umbrella = !ps(p).umbrella;
-  fire("weapon_switched", p, nullptr, source, false);  // 即再起 via the event bus
-}
 
-void Engine::prepare_strategy(Player p) {
-  Request r;
-  r.kind = "option";
-  r.prompt = "秘密准备下一个计策";
-  r.options.push_back({"神算", true, {}});
-  r.options.push_back({"鬼谋", true, {}});
-  int c = ask_one(p, std::move(r));
-  ps(p).strategy = (c == 1) ? 1 : 0;
-  ps(p).strategyKnown = false;
-}
 
-void Engine::seal_card(int host, int card) {
-  if (card < 0 || def_of(card).unsealable) return;  // 炼成攻击: 不可封印
-  move_card(card, Zone::Sealed);
-  ci(card).sealedBy = host;
-  ci(host).sealed.push_back(card);
-}
 
-void Engine::return_sealed(int host) {
-  std::vector<int> list = ci(host).sealed;
-  ci(host).sealed.clear();
-  for (int c : list) {
-    ci(c).sealedBy = -1;
-    move_card(c, Zone::Discard);  // to its owner's discard
-  }
-}
 
 int Engine::distance_delta() const {
   int d = ps(P0).tempDistanceMod + ps(P1).tempDistanceMod;  // 影飞翅 (this turn)
@@ -2055,46 +1882,9 @@ bool Engine::form_matches(const CardDef& d, const std::string& f) const {
 
 // ---- 26-Innealra 机制已迁至 engine/mechanics/fate.cpp ----
 
-void Engine::place_poison(int inst, Player holder, Zone z) {
-  // Remove the card from the *previous* owner's zone list before changing
-  // ownership: move_card erases from the list of the current owner.
-  if (ci(inst).owner != holder) {
-    move_card(inst, Zone::Limbo);
-    ci(inst).owner = holder;
-  }
-  move_card(inst, z);
-}
 
-void Engine::return_poison(int inst) {
-  if (ci(inst).bagOwner < 0) return;
-  Player bag = static_cast<Player>(ci(inst).bagOwner);
-  if (ci(inst).owner != bag) {
-    move_card(inst, Zone::Limbo);
-    ci(inst).owner = bag;
-  }
-  move_card(inst, Zone::Bag);
-}
 
-void Engine::force_move(int inst, Zone z) {
-  bool saved = poisonForce_;
-  poisonForce_ = true;
-  move_card(inst, z);
-  poisonForce_ = saved;
-}
 
-void Engine::float_poisons(Player p) {
-  std::vector<int> pois, rest;
-  for (int inst : ps(p).deck) {
-    if (def_of(inst).isPoison)
-      pois.push_back(inst);
-    else
-      rest.push_back(inst);
-  }
-  if (pois.empty()) return;
-  std::vector<int> out = rest;
-  out.insert(out.end(), pois.begin(), pois.end());  // poisons at the back == top
-  ps(p).deck = std::move(out);
-}
 
 void Engine::random_discard(Player p) {
   std::vector<int> pool;
@@ -2276,18 +2066,7 @@ bool Engine::guess_name(Player guesser, int cardInst) {
 
 
 
-bool Engine::raira_can(Player p, const std::string& kind, int tier) const {
-  return (kind == "wind" ? ps(p).wind : ps(p).thunder) >= tier;
-}
 
-bool Engine::raira_spend(Player p, const std::string& kind, int tier) {
-  if (!raira_can(p, kind, tier)) return false;
-  if (kind == "wind")
-    ps(p).wind -= tier;
-  else
-    ps(p).thunder -= tier;
-  return true;
-}
 
 bool Engine::has_named_active(Player p, const std::string& name) const {
   for (int inst : ps(p).enhance)

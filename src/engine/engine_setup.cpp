@@ -18,40 +18,8 @@
 namespace fy {
 using namespace detail;  // NOLINT
 
-int Engine::assemble_one(Player p) {
-  auto u = unassembled_parts(p);
-  if (u.empty()) return -1;
-  Request r;
-  r.kind = "option";
-  r.prompt = "组装一个零件";
-  for (int inst : u) r.options.push_back({def_of(inst).name, true, {}});
-  int idx = ask_one(p, std::move(r));
-  idx = std::min(idx, static_cast<int>(u.size()) - 1);
-  int inst = u[static_cast<size_t>(idx)];
-  assemble_part(p, inst);
-  return inst;
-}
 
-void Engine::disassemble_to(Player p, int maxCount) {
-  while (assembled_count(p) > maxCount && !st.over) {
-    auto a = assembled_parts(p);
-    if (a.empty()) break;
-    Request r;
-    r.kind = "option";
-    r.prompt = "拆除一个零件";
-    for (int inst : a) r.options.push_back({def_of(inst).name, true, {}});
-    int idx = ask_one(p, std::move(r));
-    idx = std::min(idx, static_cast<int>(a.size()) - 1);
-    disassemble_part(p, a[static_cast<size_t>(idx)]);
-  }
-}
 
-void Engine::assemble_many(Player p, int x) {
-  for (int i = 0; i < x; ++i) {
-    if (unassembled_parts(p).empty()) break;
-    assemble_one(p);
-  }
-}
 
 std::vector<int> Engine::deck_def_ids(const std::string& g, const std::string& f) const {
   std::map<std::pair<int, int>, int> chosen;
@@ -153,40 +121,10 @@ void Engine::init_barracks(Player p, const std::vector<std::pair<std::string, st
   }
 }
 
-void Engine::init_parts(Player p) {
-  ps(p).parts.clear();
-  for (const CardDef& d : defs)
-    if (d.isPart && d.goddess == "oboro") {
-      int inst = add_instance(d.id, p);
-      move_card(inst, Zone::Parts);
-      ci(inst).assembled = false;
-    }
-}
 
-int Engine::assembled_count(Player p) const {
-  int c = 0;
-  for (int inst : ps(p).parts)
-    if (ci(inst).assembled) c++;
-  return c;
-}
 
-std::vector<int> Engine::unassembled_parts(Player p) const {
-  std::vector<int> out;
-  for (int inst : ps(p).parts)
-    if (!ci(inst).assembled) out.push_back(inst);
-  return out;
-}
 
-std::vector<int> Engine::assembled_parts(Player p) const {
-  std::vector<int> out;
-  for (int inst : ps(p).parts)
-    if (ci(inst).assembled) out.push_back(inst);
-  return out;
-}
 
-void Engine::set_assembled(int inst, bool v) {
-  if (ci(inst).zone == Zone::Parts) ci(inst).assembled = v;
-}
 
 
 
@@ -209,32 +147,8 @@ void Engine::add_unused_cuts(Player p) {
   }
 }
 
-int Engine::part_by_def(Player p, int def) const {
-  for (int inst : ps(p).parts)
-    if (ci(inst).def == def) return inst;
-  return -1;
-}
 
-void Engine::disassemble_part(Player p, int inst) {
-  (void)p;
-  set_assembled(inst, false);
-}
 
-void Engine::assemble_part(Player p, int inst) {
-  set_assembled(inst, true);
-  // Hard cap 5: must immediately disassemble until <= 5.
-  while (assembled_count(p) > 5 && !st.over) {
-    auto as = assembled_parts(p);
-    if (as.empty()) break;
-    Request r;
-    r.kind = "option";
-    r.prompt = "组装超过 5 个，必须拆除一个零件";
-    for (int i : as) r.options.push_back({def_of(i).name, true, {}});
-    int idx = ask_one(p, std::move(r));
-    idx = std::min(idx, static_cast<int>(as.size()) - 1);
-    disassemble_part(p, as[static_cast<size_t>(idx)]);
-  }
-}
 
 // 女神 id → 机制位（what.md 第 2 条：能力注册表，取代运行期字符串前缀匹配）。
 uint32_t mechanic_bits(const std::string& goddess) {

@@ -19,6 +19,11 @@ void drama_ctx(CtxTypes& t);   // 20-Kanawe
 void dive_ctx(CtxTypes& t);    // 17-Hatsumi
 void barracks_ctx(CtxTypes& t);// 18-Mizuki
 void curse_ctx(CtxTypes& t);   // 21-Kamuwi
+void poison_ctx(CtxTypes& t);  // 09-Chikage
+void keiryo_ctx(CtxTypes& t);  // 07-Shinra
+void slots_ctx(CtxTypes& t);   // 12-Raira
+void parts_ctx(CtxTypes& t);   // 05-Oboro
+void memory_ctx(CtxTypes& t);  // 16-Yatsuha
 
 }  // namespace mechanics
 
@@ -33,6 +38,11 @@ void run_mechanic_ctx_blocks(CtxTypes& t) {
   mechanics::dive_ctx(t);
   mechanics::barracks_ctx(t);
   mechanics::curse_ctx(t);
+  mechanics::poison_ctx(t);
+  mechanics::keiryo_ctx(t);
+  mechanics::slots_ctx(t);
+  mechanics::parts_ctx(t);
+  mechanics::memory_ctx(t);
 }
 
 }  // namespace fy

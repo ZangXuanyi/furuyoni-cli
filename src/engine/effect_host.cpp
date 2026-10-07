@@ -507,37 +507,13 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["armor_full"] = [](LuaCtx& c, int p) { return c.e->armor_full(static_cast<Player>(p)); };
   ctx["aura_free"] = [](LuaCtx& c, int p) { return c.e->aura_free(static_cast<Player>(p)); };
   // 八叶: 镜映 = 你的装/气/命中与对手对应区域结晶数相同的区域数
-  ctx["mirror"] = [](LuaCtx& c, sol::optional<int> p) {
-    return c.e->mirror(p ? static_cast<Player>(*p) : c.who);
-  };
   // 八叶: 完全态（把一张牌就地升级为它的升级版）
-  ctx["can_upgrade"] = [](LuaCtx& c, int inst) { return c.e->can_upgrade(inst); };
-  ctx["upgrade_card"] = [](LuaCtx& c, int inst) { return c.e->upgrade_card(inst); };
   ctx["turn_number"] = [](LuaCtx& c) { return c.e->st.turn; };
-  ctx["memory_size"] = [](LuaCtx& c, int p) {
-    return c.e->memory_size(static_cast<Player>(p));
-  };
-  ctx["memory_of"] = [](LuaCtx& c, int p, sol::this_state ts) -> sol::object {
-    std::vector<int> v = c.e->ps(static_cast<Player>(p)).memory;
-    sol::table t = sol::table::create(ts.L);
-    for (size_t i = 0; i < v.size(); ++i) t[i + 1] = v[i];
-    return sol::make_object(ts.L, t);
-  };
-  ctx["to_memory"] = [](LuaCtx& c, int inst) { c.e->to_memory(inst); };
-  ctx["all_normals_to_memory"] = [](LuaCtx& c, int p, sol::optional<int> except) {
-    c.e->all_normals_to_memory(static_cast<Player>(p), except ? *except : -1);
-  };
-  ctx["memory_draw"] = [](LuaCtx& c, int p, int n) {
-    return c.e->memory_draw(static_cast<Player>(p), n);
-  };
   ctx["cards_played_total"] = [](LuaCtx& c, int p) {
     return c.e->ps(static_cast<Player>(p)).cardsPlayedTotal;
   };
   ctx["external_to_card"] = [](LuaCtx& c, int inst, int n) {
     return c.e->gain_external(AreaRef::card(inst), n);
-  };
-  ctx["count_complete"] = [](LuaCtx& c, int p) {
-    return c.e->count_complete(static_cast<Player>(p));
   };
   // 把结晶移到游戏外（生命/装/气/距/虚）。
   ctx["to_external"] = [](LuaCtx& c, int p, std::string area, int n) {
@@ -738,16 +714,6 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   };
   // Oboro
   ctx["from_cover"] = [](LuaCtx& c) { return c.e->current_from_cover(); };
-  ctx["assemble_one"] = [](LuaCtx& c, int p) { return c.e->assemble_one(static_cast<Player>(p)); };
-  ctx["disassemble_to"] = [](LuaCtx& c, int p, int m) {
-    c.e->disassemble_to(static_cast<Player>(p), m);
-  };
-  ctx["assemble_many"] = [](LuaCtx& c, int p, int x) {
-    c.e->assemble_many(static_cast<Player>(p), x);
-  };
-  ctx["assembled_count"] = [](LuaCtx& c, int p) {
-    return c.e->assembled_count(static_cast<Player>(p));
-  };
   ctx["cover_count"] = [](LuaCtx& c, int p) { return c.e->cover_count(static_cast<Player>(p)); };
   ctx["cover_cards"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).cover; };
   ctx["remove_card"] = [](LuaCtx& c, int inst) { c.e->remove_card(inst); };
@@ -785,9 +751,6 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     return c.e->normal_attacks_this_turn(p ? static_cast<Player>(*p) : c.who);
   };
   // Yukihi
-  ctx["umbrella"] = [](LuaCtx& c, int p) { return c.e->umbrella(static_cast<Player>(p)); };
-  ctx["switch_weapon"] = [](LuaCtx& c) { c.e->switch_weapon(c.who, c.source); };
-  ctx["shared_range"] = [](LuaCtx& c, int p) { return c.e->shared_range(static_cast<Player>(p)); };
   ctx["enhance_crystal_total"] = [](LuaCtx& c, int p) {
     return c.e->enhance_crystal_total(static_cast<Player>(p));
   };
@@ -822,10 +785,6 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
     c.e->use_card(inst, r ? *r : false);
   };
   // Shinra
-  ctx["strategy"] = [](LuaCtx& c, int p) { return c.e->strategy(static_cast<Player>(p)); };
-  ctx["prepare_strategy"] = [](LuaCtx& c, int p) {
-    c.e->prepare_strategy(static_cast<Player>(p));
-  };
   ctx["seal_card"] = [](LuaCtx& c, int host, int card) { c.e->seal_card(host, card); };
   ctx["return_sealed"] = [](LuaCtx& c, int host) { c.e->return_sealed(host); };
   ctx["use_foreign_card"] = [](LuaCtx& c, int inst) { c.e->use_foreign_card(c.who, inst); };
@@ -872,21 +831,18 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   ctx["count_named"] = [](LuaCtx& c, int p, std::string n) {
     return c.e->count_named(static_cast<Player>(p), n);
   };
-  ctx["sealed_card"] = [](LuaCtx& c, int h) { return c.e->sealed_card(h); };
   ctx["special_cards"] = [](LuaCtx& c, int p) {
     return c.e->special_cards(static_cast<Player>(p));
   };
   ctx["is_used"] = [](LuaCtx& c, int i) { return c.e->is_used(i); };
   ctx["is_my_turn"] = [](LuaCtx& c) { return c.e->is_my_turn(c.who); };
   // Chikage
-  ctx["poison_bag"] = [](LuaCtx& c, int p) { return c.e->poison_bag(static_cast<Player>(p)); };
   ctx["place_poison"] = [](LuaCtx& c, int inst, int holder, std::string where) {
     Zone z = (where == "hand") ? Zone::Hand : Zone::Deck;  // "deck_top" -> Deck (back == top)
     c.e->place_poison(inst, static_cast<Player>(holder), z);
   };
   ctx["return_poison"] = [](LuaCtx& c, int inst) { c.e->return_poison(inst); };
   ctx["force_discard"] = [](LuaCtx& c, int inst) { c.e->force_move(inst, Zone::Discard); };
-  ctx["is_poison"] = [](LuaCtx& c, int inst) { return c.e->is_poison(inst); };
   ctx["effective_distance"] = [](LuaCtx& c) { return c.e->distance(); };
   ctx["card_name"] = [](LuaCtx& c, int i) { return c.e->def_of(i).name; };
   ctx["set_cannot_advance"] = [](LuaCtx& c, int p) {
@@ -918,37 +874,6 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   };
   ctx["add_unused_cuts"] = [](LuaCtx& c, int p) {
     c.e->add_unused_cuts(static_cast<Player>(p));
-  };
-  ctx["raira_can"] = [](LuaCtx& c, std::string k, int t) { return c.e->raira_can(c.who, k, t); };
-  ctx["raira_spend"] = [](LuaCtx& c, std::string k, int t) { return c.e->raira_spend(c.who, k, t); };
-  ctx["raira_restrict"] = [](LuaCtx& c, int p) {
-    c.e->raira_gain_restrict(static_cast<Player>(p));
-  };
-  ctx["raira_perm_cut"] = [](LuaCtx& c, int p) {
-    c.e->raira_perm_cut(static_cast<Player>(p));
-  };
-  ctx["wind"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).wind; };
-  ctx["thunder"] = [](LuaCtx& c, int p) { return c.e->ps(static_cast<Player>(p)).thunder; };
-  ctx["raira_gain"] = [](LuaCtx& c, int p, sol::object slot) {
-    Player pl = static_cast<Player>(p);
-    // Accept "wind"/"thunder" (preferred) or the legacy slot number (0=风, 1=雷).
-    bool thunder = false;
-    if (slot.is<std::string>()) thunder = slot.as<std::string>() == "thunder";
-    else if (slot.is<int>()) thunder = slot.as<int>() == 1;
-    if (thunder) {
-      if (c.e->ps(pl).thunder < 20) c.e->ps(pl).thunder += 1;
-    } else {
-      if (c.e->ps(pl).wind < 20) c.e->ps(pl).wind += 1;
-    }
-  };
-  ctx["set_slot"] = [](LuaCtx& c, int p, std::string k, int v) {
-    Player pl = static_cast<Player>(p);
-    if (v < 0) v = 0;
-    if (v > 20) v = 20;
-    if (k == "wind")
-      c.e->ps(pl).wind = v;
-    else
-      c.e->ps(pl).thunder = v;
   };
   ctx["set_flare"] = [](LuaCtx& c, int p, int n) {
     c.e->ps(static_cast<Player>(p)).flare = n < 0 ? 0 : n;

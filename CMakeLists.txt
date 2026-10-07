@@ -32,6 +32,11 @@ add_library(furuyoni
   src/engine/mechanics/dive.cpp
   src/engine/mechanics/barracks.cpp
   src/engine/mechanics/curse.cpp
+  src/engine/mechanics/poison.cpp
+  src/engine/mechanics/keiryo.cpp
+  src/engine/mechanics/slots.cpp
+  src/engine/mechanics/parts.cpp
+  src/engine/mechanics/memory.cpp
   src/engine/effect_host.cpp
   src/protocol/agent.cpp
 )
