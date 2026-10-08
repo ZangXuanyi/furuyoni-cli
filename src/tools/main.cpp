@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <filesystem>
 #include <cstdlib>
 #include <fstream>
 #include <memory>
@@ -174,6 +175,17 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  // 结果落盘（与决策日志同生命周期）：写在 --record 文件旁的 result.md，
+  // 对局脚本被中断也不会丢失播报。桥/赛程脚本据此与各自座位目录同步。
+  if (!recordPath.empty()) {
+    std::filesystem::path rp(recordPath);
+    std::ofstream res(rp.parent_path() / "result.md");
+    res << "# 对局结果\n\n" << e.result_text() << "\n回合数: " << e.st.turn
+        << "　胜者: " << (e.st.winner == -1 ? std::string("平局")
+                                            : "Player" + std::to_string(e.st.winner))
+        << "\n种子: " << cfg.seed << "\n";
+    std::printf("result written: %s\n", (rp.parent_path() / "result.md").string().c_str());
+  }
   std::printf("ruleset: %s\n", e.ruleset_summary().c_str());
   std::printf("seed=%llu turns=%d winner=%d hash=%llu\n",
               static_cast<unsigned long long>(cfg.seed), e.st.turn, e.st.winner,

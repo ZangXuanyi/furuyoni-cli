@@ -26,6 +26,7 @@ nlohmann::json request_to_json(const Request& req) {
     j["options"].push_back(jo);
   }
   j["state"] = req.state;
+  if (!req.data.is_null()) j["data"] = req.data;  // 如对应窗口的 data.attack 摘要
   return j;
 }
 

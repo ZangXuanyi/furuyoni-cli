@@ -21,8 +21,10 @@ Agent 只需读写文件。
 2. 为**每个座位**开一个 Agent 会话（ZCode 新窗口或 DeepSeek Harness），把下面的
    系统提示粘给它（替换 `<邮箱目录>` 与 `<座位号>`）。
 3. 打完看 `$OUT/replay.html`（WebUI 逐步复盘，含结算栈）与各座位 `transcript.md`。
-   对局结束时：桥自动写 `inbox/GAME-OVER.md`，`match.sh` 把结果写进双方座位目录
-   `result.md`——Agent 无需轮询判断对局是否结束。
+   **结果播报有三层保障**：引擎在写决策日志的同时把 `result.md` 写在日志旁
+   （与对局同生命周期，任何脚本中断都不会丢失）；桥在协议流优雅关闭时写
+   `inbox/GAME-OVER.md`；`match.sh` 赛后再把结果分发进双方座位目录（兜底覆盖
+   被硬杀的桥）。Agent 无需轮询判断对局是否结束。
 4. 练习赛建议 3~5 局、换种子；之后进入第二场「限时写脚本」——直接
    `--p0-cmd "python3 队伍脚本.py"` 接入，协议同 `docs/agent-protocol.md`。
 

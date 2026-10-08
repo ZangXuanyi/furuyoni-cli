@@ -32,11 +32,32 @@ echo "[match] p1 邮箱: $P1DIR   (把该目录交给座位 1 的 Agent)"
     "$@" 2>&1 | tee "$OUT/engine.log"
 
 # 决出胜负后：把结果写进双方座位目录（Agent 侧也能看到）。
-RESULT=$(grep -E "Player[01].*胜|draw" "$OUT/engine.log" | tail -1)
+# 结果从决策日志 game.json 提取（自带 winner 字段），不依赖引擎 stdout——
+# 引擎被管道/中断夺走 stdout 时也能正确播报。
+RESULT=$(python3 - "$OUT/game.json" <<'PYEOF'
+import json, sys
+try:
+    g = json.load(open(sys.argv[1]))
+except Exception as e:
+    print(f"（无法读取决策日志: {e}）"); raise SystemExit
+w = g.get("winner")
+if w == -1:
+    print("平局（回合上限）")
+elif w in (0, 1):
+    print(f"Player{w} 胜（对手 Player{1 - w}）")
+else:
+    print(f"异常结束（winner={w}，详见 engine.log）")
+print(f"回合数: {g.get('turn', '?')}　决策数: {len(g.get('entries', []))}")
+PYEOF
+) || RESULT="（结果提取失败，见 engine.log / game.json）"
 for SD in "$P0DIR" "$P1DIR"; do
-  printf '# 对局结果\n\n%s\n\n(完整复盘: %s/replay.html)\n' \
-    "${RESULT:-（未见结果行，见 engine.log）}" "$OUT" > "$SD/result.md"
+  printf '# 对局结果\n\n%s\n\n完整复盘: %s/replay.html；决策日志: %s/game.json\n' \
+    "$RESULT" "$OUT" "$OUT" > "$SD/result.md"
+  # 桥在协议流优雅关闭时会自己写；这里兜底（幂等）——覆盖被硬杀的情况。
+  printf '# 对局结束\n\n%s\n详细内容见本目录 result.md 与 transcript.md。\n' \
+    "$RESULT" > "$SD/inbox/GAME-OVER.md" 2>/dev/null || true
 done
+echo "[match] $RESULT"
 
 echo
 echo "[match] 完成。产物:"
