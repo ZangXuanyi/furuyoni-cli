@@ -328,8 +328,8 @@ void Engine::resolve_card_effect(Player p, int inst, bool asResponse, bool zenka
     } else {
       declare_attack(a);
       resolve_attack(a);
-      if (a.hit && effects_->has(defId, "on_attack_after"))
-        effects_->call(*this, defId, "on_attack_after", p, inst);
+      if (a.hit && !a.noAfterEffects && effects_->has(defId, "on_attack_after"))
+        effects_->call(*this, defId, "on_attack_after", p, inst);  // 虚伪压制
       if (a.terminal) {  // 电磁炮 黄: dynamic 终端
         if (st.active != p)
           ps(p).cannotRespond = true;
@@ -359,13 +359,10 @@ void Engine::resolve_enhance(Player p, int inst, const CardDef& d) {
   const int defId = d.id;
   // 1. 种植（19-Megumi 耕种）：先把 1 个种子移到「植株」。
   cultivate(p);
-  // Re-expanding a card that still holds 献 (e.g. reuse): return the old ones first.
-  if (card_crystal_count(inst) > 0) {
-    int sak = 0;
-    int old = card_crystal_count(inst);
-    take_card_crystals(inst, old, kTakeNormal, &sak);
-    if (sak > 0) decay_crystals(inst, sak);
-  }
+  // Re-expanding a card that still holds 献 (e.g. reuse): return the old ones first
+  //（容量感知：放不下的留在牌上）。
+  if (card_crystal_count(inst) > 0)
+    drain_to_decay(inst, card_crystal_count(inst), kTakeNormal);
   // 2. 给献（纳支付；虚+装不足尽量多；0 则不放）。pay_nagi 直接把献放到牌上。
   pay_nagi(p, inst);
   // 进付与区（通常）/ 切牌区（切札付与）。
@@ -378,16 +375,19 @@ void Engine::resolve_enhance(Player p, int inst, const CardDef& d) {
   if (effects_->has(defId, "on_expand")) effects_->call(*this, defId, "on_expand", p, inst);
   // 19-Megumi 生长X：询问玩家是否将至多 X 个「植株」移到该牌上（可以不移动）。
   grow_enhance(p, inst);
-  // 4. 献=0：立即弃置（弃置时效果照常触发）。
+  // 4. 献=0：立即弃置（弃置时效果照常触发；虚伪展开中对手付与不结算）。
   if (card_crystal_count(inst) <= 0) {
     ci(inst).crystals = 0;
     ci(inst).green = 0;
+    const bool noDiscardFx = discard_suppressed(p);  // 虚伪
     if (d.kind == CardKind::Normal) {
       move_card(inst, Zone::Discard);
-      if (effects_->has(defId, "on_discard")) effects_->call(*this, defId, "on_discard", p, inst);
+      if (effects_->has(defId, "on_discard") && !noDiscardFx)
+        effects_->call(*this, defId, "on_discard", p, inst);
       fire("enhance_left", p, nullptr, inst, false);
     } else {
-      if (effects_->has(defId, "on_discard")) effects_->call(*this, defId, "on_discard", p, inst);
+      if (effects_->has(defId, "on_discard") && !noDiscardFx)
+        effects_->call(*this, defId, "on_discard", p, inst);
       // 26-Innealra 万劫缠迫: 弃置时把自己移出游戏 —— 不能又被送回切牌区。
       if (ci(inst).zone == Zone::Removed) return;
       move_card(inst, Zone::Special);

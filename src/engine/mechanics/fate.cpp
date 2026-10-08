@@ -112,6 +112,16 @@ int Engine::fragile_will_host(Player gainer) const {
   return -1;
 }
 
+// 13-Utsuro 虚伪: holder 的对手是否有「对手付与的破弃时不结算」的生效牌。
+bool Engine::discard_suppressed(Player holder) const {
+  const Player o = opp(holder);
+  for (int inst : ps(o).enhance)
+    if (def_of(inst).suppressEnemyDiscard) return true;
+  for (int inst : ps(o).special)
+    if (enhance_active(inst) && def_of(inst).suppressEnemyDiscard) return true;
+  return false;
+}
+
 bool Engine::suppress_attack_mods(Player attacker) const {
   const Player o = opp(attacker);
   for (int inst : ps(o).enhance)

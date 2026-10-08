@@ -61,10 +61,18 @@ void Engine::setup_player(Player p, const std::vector<std::pair<std::string, std
     for (const CardDef& d : defs)
       if (d.name == ban.card) bannedDefs.push_back(d.id);
   }
+  std::vector<std::string> dualNames;  // 已入池的双女神牌名（合奏去重）
   for (const auto& [g, f] : picks) {
     setIds.push_back(f == "O" ? g : g + "." + f);
     for (int defId : deck_def_ids(g, f)) {
       if (std::find(bannedDefs.begin(), bannedDefs.end(), defId) != bannedDefs.end()) continue;
+      // 合奏（双女神牌）在两位女神的模块里各有一份 def；两柱同选时构筑池
+      // 只出现一次（裁定 2026-10-08：琵琶+笛至多一张合奏）。
+      if (!def(defId).goddesses.empty()) {
+        if (std::find(dualNames.begin(), dualNames.end(), def(defId).name) != dualNames.end())
+          continue;
+        dualNames.push_back(def(defId).name);
+      }
       int inst = add_instance(defId, p);
       if (def(defId).kind == CardKind::Normal)
         normals.push_back(inst);

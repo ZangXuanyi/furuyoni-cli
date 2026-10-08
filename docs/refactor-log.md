@@ -14,6 +14,33 @@
 | **Lua API v2** | 删除裸写入器 `set_vigor`/`set_flare`（→ `cost_vigor`/`vigor_to`/`flare_to`）；新增 `self_boost`/`reveal_cards`/`aura_damage`/`life_damage`；旧结晶入口 `move_crystals`/`add_crystals`/`amount` 标 [[deprecated]] |
 | **内部架构** | tokens.cpp（结晶/异樱唯一入口）、pipeline.cpp（命名阶段 + PlayFrame）、mechanics/（16 机制各归其文件）、effect_ctx.hpp（绑定共享层）、MechanicBit 能力注册表取代女神名前缀匹配 |
 
+## 需求方边界八例（2026-10-08 验收，全部通过）
+
+裁定与落地：
+1. **距区结晶硬上限 10**（基座 10 格；有效距离可经修正>10，上限只约束 st.distance
+   原始值）。`max_distance_crystals()` 钩子预留光环提高。**能移多少移多少**：
+   `drain_to_decay` 统一「取牌上结晶→按 decay_to 归置」，放不下的留在牌上
+   （consume 的固定-1 / empty_card / remove_all_normals / drain_card_crystals /
+   重展开旧献返还 / ctx:move_from_card 全部容量感知；后者溢出不再进虚）。
+   后退/离脱在距满时不再出现在基本动作中。
+2. **诸式理解(鬼谋)→圈域献经虚转距**：drain_card_crystals 本就路由 decay_to ✓，
+   叠加容量后距满留牌上。钉死测试。
+3. **合奏去重**：两位女神模块各有一份 def，琵琶+笛 的构筑池只出现一张
+   （setup_player 收集时按双女神牌名去重）。
+4-6. **虚伪新文本**：纳-1（既有）+ 距离缩近(近1)（既有）+ **不结算攻击后效果**
+   （Attack::noAfterEffects，压制 on_attack_after 与 after= 闭包）+ **不结算对手
+   付与破弃时**（suppress_enemy_discard，压制 drop/consume/0献弃置三处；牌照常
+   离场）。展开时不使已有付与脱落 ✓（enemyNagiMod 只作用于新展开）。已入栈的
+   破弃时攻击不回溯（虚伪作为对应打出时，被对应的破弃时攻击照常结算）。
+7. **阴郁·埋葬修订**：只压制**增益类**修正——正增量清零（min(Δ,0)），伤害减少类
+   与替换类正常。一闪决死→2/2（不变），居合距≤2→3/2（减益保留），对照距3→4/3。
+8. **模块化弹栈语义**：既有 action_resolved 事件即「弹栈检查」的等价实现
+   （事件在嵌套结算内层完成时触发，天然 LIFO）；用交错提示钉死时序
+   basicC→TB后记→basicB→TA后记→basicA，且再起复用的行动切牌同样触发。
+   无需改动事件管线。
+
+顺带中文化：免费基本动作提示与「停止」。验证：238/238 + 600 模糊 + ASan 100。
+
 ## 交付验收（2026-10-07，用户七项难点全部通过）
 
 按用户给定的正确结果写的专项测试（engine_tests「难点*」），其中三处发现并修复：

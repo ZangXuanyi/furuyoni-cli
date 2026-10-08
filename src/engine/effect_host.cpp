@@ -347,6 +347,8 @@ EffectHost::EffectHost() : impl_(std::make_unique<Impl>()) {
   atkutil["terminal"] = [](LuaAttack& h) { h.a->terminal = true; };
   // 强酸: 因命伤而移动的樱花结晶进入虚（而非敌气）。
   atkutil["life_to_dust"] = [](LuaAttack& h) { h.a->lifeDamageToDust = true; };
+  // 虚伪: 该攻击的攻击后效果（on_attack_after / after= 闭包）不结算。
+  atkutil["no_after_effects"] = [](LuaAttack& h) { h.a->noAfterEffects = true; };
   // 暗礁海域: 攻击距离只保留最大值与最小值（需先包含至少三个自然数）。
   atkutil["keep_extremes"] = [](LuaAttack& h) {
     auto& spans = h.a->range.spans;
@@ -1260,6 +1262,7 @@ void EffectHost::load_file(const std::string& path, std::vector<CardDef>& defs) 
     d.suppressEnemyAttackMods = t.get_or("suppress_enemy_attack_mods", false);
     d.nagiFromDistance = t.get_or("nagi_from_distance", false);
     d.rebuildFreeze = t.get_or("rebuild_freeze", false);
+    d.suppressEnemyDiscard = t.get_or("suppress_enemy_discard", false);
     d.fragileWill = t.get_or("fragile_will", false);
     d.flags = flags_from(t);
     sol::object atk = t["attack"];

@@ -157,8 +157,9 @@ return {
     reset = { kind = "end_turn",
       cond = function(ctx) return ctx:resonance_count(ctx:player()) >= 2 end } },
 
-  -- O1-S2 阴郁·埋葬（1）：对应【纳1】展开中：对手的攻击不受攻击修正
-  -- （即只有卡面数值，但替换类的正常结算）。
+  -- O1-S2 阴郁·埋葬（1）：对应【纳1】展开中：对手的攻击不受**攻击增加类**
+  -- 修正影响（即只有卡面数值，但替换类、伤害减少类的正常结算）。
+  --（2026-10-08 修订文本；正增量清零由引擎 suppress_attack_mods 实现。）
   { set = "innealra", form = "O", num = 2, name = "阴郁·埋葬", kind = "special",
     type = "enhance", cost = 1, nagi = 1, response = true,
     suppress_enemy_attack_mods = true },

@@ -115,6 +115,7 @@ struct CardDef {
   bool suppressEnemyAttackMods = false;  // 阴郁·埋葬: 对手的攻击不受攻击修正
   bool nagiFromDistance = false; // 舍弃·希冀: 这张牌的献可以从距中选择
   bool rebuildFreeze = false;    // 栖身·垂暮: 对手下一次重铸时弃牌堆不移动
+  bool suppressEnemyDiscard = false;  // 13-Utsuro 虚伪: 展开中对手付与的破弃时不结算
   bool fragileWill = false;      // 脆弱意志: 对手装附外的装获得改为进此牌；基本装附则移除此牌1结晶
   std::string text;
 };

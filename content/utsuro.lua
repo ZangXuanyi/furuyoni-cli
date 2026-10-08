@@ -90,12 +90,20 @@ return {
     cost = function(ctx) return math.max(0, 24 - ctx:dust()) end,  -- 24-X, X=当前虚
     on_play = function(ctx) ctx:move("life", "dust", 3, ctx:opp(), ctx:opp()) end },
 
+  -- O-S2 虚伪（3）：对应【纳3】展开中：对手的所有攻击获得距离缩小（近1），
+  -- 并不结算其攻击后效果；对手所有的付与牌的纳-1，并不结算其破弃时效果。
+  --（2026-10-08 修订文本；攻击后/破弃时压制由引擎旗标 no_after_effects /
+  --  suppress_enemy_discard 实现。）
   { set = "utsuro", form = "O", num = 2, name = "虚伪", kind = "special", type = "enhance",
-    cost = 3, nagi = 3, enemy_nagi_mod = -1,
+    cost = 3, nagi = 3, response = true, enemy_nagi_mod = -1,
+    suppress_enemy_discard = true,
     continuous = {
       { when = "expanded", query = "attack",
         apply = function(ctx, atk)
-          if atk:attacker() == ctx:opp() then atk:shrink_near(1) end  -- 对手攻击距离 -1（近端）
+          if atk:attacker() == ctx:opp() then
+            atk:shrink_near(1)        -- 距离缩小（近1）
+            atk:no_after_effects()    -- 不结算其攻击后效果
+          end
         end },
     } },
 

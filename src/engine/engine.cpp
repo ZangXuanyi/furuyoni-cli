@@ -889,7 +889,7 @@ bool Engine::basic_legal(Player p, BasicAction a) const {
              aura_free(p) > 0;  // 冰晶占位
     case BasicAction::Retreat:
       return !ps(p).cannotRetreat && !has_named_active(opp(p), cards::kMud) &&
-             ps(p).aura >= 1;
+             ps(p).aura >= 1 && st.distance < max_distance_crystals();  // 距区需有余量
     case BasicAction::Aura: {
       if (st.dust < 1) return false;
       if (aura_free(p) > 0) return true;
@@ -899,7 +899,8 @@ bool Engine::basic_legal(Player p, BasicAction a) const {
     case BasicAction::Flare:
       return !has_enemy_no_flare(p) && (frozen(p) || ps(p).aura >= 1);
     case BasicAction::Escape:
-      return !has_named_active(opp(p), cards::kMud) && distance() <= near_distance() && st.dust >= 1;
+      return !has_named_active(opp(p), cards::kMud) && distance() <= near_distance() &&
+             st.dust >= 1 && st.distance < max_distance_crystals();  // 距区需有余量
   }
   return false;
 }
@@ -959,10 +960,10 @@ void Engine::free_basics(Player p, int maxTimes) {
     if (legal.empty()) return;
     Request r;
     r.kind = "option";
-    r.prompt = "free basic action";
+    r.prompt = "执行一次基本动作（可不执行）";
     for (BasicAction ba : legal)
       r.options.push_back({std::string("基本动作：") + basic_cn(ba), true, {}});
-    r.options.push_back({"stop", true, {}});
+    r.options.push_back({"停止", true, {}});
     int idx = ask_one(p, std::move(r));
     if (idx >= static_cast<int>(legal.size())) return;
     do_basic(p, legal[static_cast<size_t>(idx)]);
@@ -986,10 +987,10 @@ void Engine::free_basics_of(Player p, int maxTimes, const std::vector<std::strin
     if (legal.empty()) return;
     Request r;
     r.kind = "option";
-    r.prompt = "free basic action";
+    r.prompt = "执行一次基本动作（可不执行）";
     for (BasicAction ba : legal)
       r.options.push_back({std::string("基本动作：") + basic_cn(ba), true, {}});
-    r.options.push_back({"stop", true, {}});
+    r.options.push_back({"停止", true, {}});
     int idx = ask_one(p, std::move(r));
     if (idx >= static_cast<int>(legal.size())) return;
     do_basic(p, legal[static_cast<size_t>(idx)]);
@@ -1776,13 +1777,30 @@ void Engine::decay_crystals(int inst, int n) {
   token_adjust(AreaRef::dust(), Token::Sakura, n);
 }
 
+// 牌上结晶 decay_to 目的地的剩余容量（裁定 2026-10-08：能移多少移多少）。
+int Engine::decay_free_capacity(int inst) const {
+  const CardDef& d = def_of(inst);
+  if (d.decayTo == "distance") return max_distance_crystals() - st.distance;
+  // 漫天的花道（decayToOwnerAura）：装满则转气（decay_crystals 自身处理），
+  // 总能落位 → 无容量限制。
+  return std::numeric_limits<int>::max();  // 虚/敌气/惑无上限
+}
+
+// 容量感知的「取牌上结晶并按 decay_to 归置」统一入口：放不下的留在牌上。
+int Engine::drain_to_decay(int inst, int n, int mode) {
+  if (inst < 0 || n <= 0) return 0;
+  int take = std::min(n, decay_free_capacity(inst));
+  if (take <= 0) return 0;
+  int sak = 0;
+  int got = take_card_crystals(inst, take, mode, &sak);
+  if (sak > 0) decay_crystals(inst, sak);
+  return got;
+}
+
 void Engine::empty_card(int inst) {
   if (inst < 0 || card_crystal_count(inst) <= 0) return;
-  int sak = 0;
-  int n = card_crystal_count(inst);
-  take_card_crystals(inst, n, kTakeOwn, &sak);
-  if (sak > 0) decay_crystals(inst, sak);
-  drop_enhance_if_empty(inst);
+  drain_to_decay(inst, card_crystal_count(inst), kTakeOwn);
+  drop_enhance_if_empty(inst);  // 目的地满时结晶留在牌上，保持展开
 }
 
 void Engine::remove_all_normals(Player p) {
@@ -1791,12 +1809,8 @@ void Engine::remove_all_normals(Player p) {
     if (def_of(i).kind != CardKind::Normal) continue;
     if (st.insts[static_cast<size_t>(i)].zone == Zone::Removed) continue;
     if (vec_has(ps(p).barracks, i)) continue;  // 18-Mizuki: 兵舍士兵不受此影响
-    if (card_crystal_count(i) > 0) {  // 献 leave the card before it does
-      int sak = 0;
-      int n = card_crystal_count(i);
-      take_card_crystals(i, n, kTakeNormal, &sak);
-      if (sak > 0) decay_crystals(i, sak);
-    }
+    if (card_crystal_count(i) > 0)  // 献 leave the card before it does
+      drain_to_decay(i, card_crystal_count(i), kTakeNormal);
     move_card(i, Zone::Removed);
   }
 }
@@ -1992,11 +2006,7 @@ int Engine::sealed_card(int host) const {
 }
 
 int Engine::drain_card_crystals(int inst, int n) {
-  if (inst < 0 || n <= 0) return 0;
-  int sak = 0;
-  int got = take_card_crystals(inst, n, kTakeNormal, &sak);
-  if (sak > 0) decay_crystals(inst, sak);
-  return got;
+  return drain_to_decay(inst, n, kTakeNormal);  // 容量感知：放不下的留在牌上
 }
 
 void Engine::discard_top(Player p) {

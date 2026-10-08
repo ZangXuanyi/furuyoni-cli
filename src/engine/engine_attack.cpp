@@ -68,7 +68,9 @@ void Engine::drop_enhance_if_empty(int inst) {
   const Player who = ci(inst).holder;  // controller while in play
   if (ci(inst).zone == Zone::Enhance) {
     move_card(inst, Zone::Discard);
-    if (effects_->has(d.id, "on_discard")) effects_->call(*this, d.id, "on_discard", who, inst);
+    // 13-Utsuro 虚伪: 展开中对手付与的破弃时不结算（牌照常离场）。
+    if (effects_->has(d.id, "on_discard") && !discard_suppressed(who))
+      effects_->call(*this, d.id, "on_discard", who, inst);
     fire("enhance_left", who, nullptr, inst, false);  // 森罗判证
   }
   // A used 切札付与 stays in the special zone; enhance_active() ends its aura.
@@ -229,19 +231,19 @@ void Engine::consume_enhance_crystal(int inst) {
   if (card_crystal_count(inst) <= 0) return;
   const CardDef& d = def_of(inst);
   Player owner = c.holder;  // the controller, for on_discard / 弃置时
-  // 19-Megumi: 先移除樱花结晶、再移除绿色结晶（绿色回种子/假想树）。
-  int sak = 0;
-  take_card_crystals(inst, 1, kTakeSustain, &sak);
-  // a dropped 献 falls to 虚 by default; 圈域 sends it to 距 instead.
-  if (sak > 0) decay_crystals(inst, sak);
+  // 容量感知的固定 -1（裁定 2026-10-08）：decay_to 目的地满时结晶留在牌上
+  //（19-Megumi 先樱花后绿色的次序由 take_card_crystals 保证）。
+  if (drain_to_decay(inst, 1, kTakeSustain) == 0) return;  // 一颗都没动
   if (card_crystal_count(inst) > 0) return;
   if (d.kind == CardKind::Normal) {
     move_card(inst, Zone::Discard);
-    if (effects_->has(d.id, "on_discard")) effects_->call(*this, d.id, "on_discard", owner, inst);
+    if (effects_->has(d.id, "on_discard") && !discard_suppressed(owner))  // 虚伪
+      effects_->call(*this, d.id, "on_discard", owner, inst);
     fire("enhance_left", owner, nullptr, inst, false);  // 森罗判证
   } else {
     // 切札付与 also runs its 弃置时 when it leaves play.
-    if (effects_->has(d.id, "on_discard")) effects_->call(*this, d.id, "on_discard", owner, inst);
+    if (effects_->has(d.id, "on_discard") && !discard_suppressed(owner))  // 虚伪
+      effects_->call(*this, d.id, "on_discard", owner, inst);
     // 26-Innealra 万劫缠迫: 弃置时把自己移出游戏 —— 不能又被送回切牌区。
     if (ci(inst).zone == Zone::Removed) return;
     if (ci(inst).holder != ci(inst).owner) {  // borrowed: return to its owner
@@ -585,17 +587,19 @@ void Engine::resolve_attack(Attack& a) {
   if (a.negateDamage) {  // 驳论: negate only the damage, keep附加效果
     a.hit = true;
     fire("attack_resolved", a.attacker, &a, -1, false);
-    effects_->run_after_attack(*this, &a);
+    if (!a.noAfterEffects)  // 虚伪: 攻击后效果不结算
+      effects_->run_after_attack(*this, &a);
     effects_->clear_attack_callbacks(&a);
     return;
   }
 
   // ---- damage --------------------------------------------------------------
-  // 26-Innealra O1-S2 阴郁·埋葬: 展开中，对手的攻击不受攻击修正（只有卡面数值；
-  // 数值替换类的连续效果在 finalize 阶段已经生效）。
+  // 26-Innealra O1-S2 阴郁·埋葬（2026-10-08 修订文本）: 展开中，对手的攻击
+  // 不受**攻击增加类**修正影响——正增量清零；伤害减少类（负增量）与数值替换类
+  // （finalize 阶段已生效）正常结算。
   if (suppress_attack_mods(a.attacker)) {
-    a.auraDelta = 0;
-    a.lifeDelta = 0;
+    a.auraDelta = std::min(a.auraDelta, 0);
+    a.lifeDelta = std::min(a.lifeDelta, 0);
   }
   std::optional<int> effA = a.aura;
   std::optional<int> effL = a.life;

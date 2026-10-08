@@ -2538,6 +2538,7 @@ TEST_CASE("准备阶段：每张付与牌每回合只移除 1 个结晶") {
   int i2 = e.add_instance(d2, P0);
   e.move_card(i2, Zone::Enhance);
   e.ci(i2).crystals = 3;
+  e.st.distance = 5;  // 距区留余量（裁定 2026-10-08：满 10 时圈域的献留在牌上）
   // 抽牌堆留一张牌，避免焦躁干扰断言
   int dz = e.add_instance(find_def(e, "utsuro", "雪刃") >= 0 ? find_def(e, "utsuro", "雪刃")
                                                              : d1, P0);
@@ -3974,7 +3975,9 @@ TEST_CASE("观空: 观空穹仪距离 +5（可>10）、弃置时三处敌结晶�
   e.reset_special(gi);
   CHECK(e.ci(gi).faceUp);
 
-  // 弃置时：1敌命到距、1敌装到距、1敌气到距。
+  // 弃置时：1敌命到距、1敌装到距、1敌气到距。距区结晶硬上限 10（裁定
+  // 2026-10-08），故先把原始距调到 7 留出余量（有效距离仍为 7+5=12>10）。
+  e.st.distance = 7;
   e.st.p[P1].life = 10;
   e.st.p[P1].aura = 3;
   e.st.p[P1].flare = 2;
@@ -3983,7 +3986,8 @@ TEST_CASE("观空: 观空穹仪距离 +5（可>10）、弃置时三处敌结晶�
   CHECK(e.st.p[P1].life == 9);
   CHECK(e.st.p[P1].aura == 2);
   CHECK(e.st.p[P1].flare == 1);
-  CHECK(e.st.distance == 13);
+  CHECK(e.st.distance == 10);
+  CHECK(e.distance() == 10);  // 穹仪已随献尽弃置，+5 光环离场
 }
 
 TEST_CASE("观空: 以观空牌组自战不产生 Lua 错误、保持不变量并出现瞄准点询问") {
@@ -5145,7 +5149,7 @@ TEST_CASE("安琪娜: 交易终端、资本多则执行基本动作、多 3 则�
   load_all_content(e);
   AkinaAgent a0;
   a0.rule("交易", "斩");
-  a0.rule("free basic action", "基本动作：聚气");  // 聚气：资本不变
+  a0.rule("执行一次基本动作", "基本动作：聚气");  // 聚气：资本不变
   a0.pickOptional = true;
   FirstAgent a1;
   akina_setup(e, "yurina", &a0, &a1);
@@ -6589,4 +6593,355 @@ TEST_CASE("对应窗口请求携带被对应攻击的摘要（data.attack）") {
     if (k == "超克") hasOverwhelm = true;
   CHECK(hasOverwhelm);
   CHECK(atk["attacker"] == 1);
+}
+
+// ---------------------------------------------------------------------------
+// 需求方边界情况八例（2026-10-08 验收）
+// ---------------------------------------------------------------------------
+
+TEST_CASE("边界1: 距区结晶硬上限10，第二张圈域的献留在牌上") {
+  Config cfg = make_cfg("standard", 1);
+  Engine e(cfg);
+  e.load_content(find_file("content/saine.lua"));
+  FirstAgent a;
+  e.set_agent(P0, &a);
+  e.set_agent(P1, &a);
+  // 两张圈域各 1 献，距 = 9。
+  int c1 = e.add_instance(find_def(e, "saine", "圈域"), P0);
+  e.move_card(c1, Zone::Enhance);
+  e.ci(c1).crystals = 1;
+  int c2 = e.add_instance(find_def(e, "saine", "圈域"), P0);
+  e.move_card(c2, Zone::Enhance);
+  e.ci(c2).crystals = 1;
+  e.st.distance = 9;
+  e.consume_enhance_crystal(c1);
+  CHECK(e.st.distance == 10);           // 第一张：献入距
+  CHECK(e.ci(c1).zone == Zone::Discard);  // 献尽离场
+  e.consume_enhance_crystal(c2);
+  CHECK(e.st.distance == 10);           // 距满：放不进去
+  CHECK(e.ci(c2).crystals == 1);        // 能移多少移多少：献留在牌上
+  CHECK(e.ci(c2).zone == Zone::Enhance);  // 仍有结晶 → 保持展开
+  CHECK(crystals_total(e) == 36 + 1);   // 测试直置 crystals 多出 1 颗（非守恒场景）
+}
+
+TEST_CASE("边界2: 诸式理解(鬼谋)移圈域结晶 → 经虚转距；距满留牌上") {
+  Config cfg = make_cfg("standard", 1);
+  Engine e(cfg);
+  e.load_content(find_file("content/shinra.lua"));
+  e.load_content(find_file("content/saine.lua"));
+  FindOptionAgent pick("对手一张付与");
+  e.set_agent(P0, &pick);
+  e.set_agent(P1, &pick);
+  // 鬼谋：直接驱动等价操作 drain_card_crystals（诸式理解鬼谋分支的底层调用）。
+  int ring = e.add_instance(find_def(e, "saine", "圈域"), P1);
+  e.move_card(ring, Zone::Enhance);
+  e.ci(ring).crystals = 2;
+  e.st.distance = 9;
+  int got = e.drain_card_crystals(ring, 2);
+  CHECK(got == 1);                      // 只有 1 颗能进距
+  CHECK(e.st.distance == 10);           // 圈域的 decay_to=distance：经虚转距
+  CHECK(e.st.dust == 0);                // 没有留在虚
+  CHECK(e.ci(ring).crystals == 1);      // 其余留牌上
+}
+
+TEST_CASE("边界3: 眼前构筑 琵琶+笛 只出现一张合奏") {
+  Config cfg = make_cfg("standard", 1);
+  cfg.preset = "gachi-full";  // 允许异相
+  Engine e(cfg);
+  load_all_content(e);
+  struct DraftAgent : Agent {
+    Decision decide(const Request& req) override {
+      if (req.kind == "draft_pick") {
+        Decision d;
+        for (size_t i = 0; i < req.options.size() && d.indices.size() < 3; ++i) {
+          const std::string& lb = req.options[i].label;
+          if (lb == "saine (A1)" || lb == "tokoyo (A1)" || lb == "yurina (O)")
+            d.indices.push_back(static_cast<int>(i));
+        }
+        return d;
+      }
+      return Decision{{0}};
+    }
+  } drafter;
+  e.set_agent(P0, &drafter);
+  FirstAgent a;
+  e.set_agent(P1, &a);
+  e.setup_match();
+  int duals = 0;
+  for (size_t i = 0; i < e.st.insts.size(); ++i)
+    if (e.st.insts[i].owner == P0 && e.def_of(static_cast<int>(i)).name == "合奏") duals += 1;
+  CHECK(duals == 1);  // 两位女神模块各有一份 def，构筑池只出现一张
+}
+
+TEST_CASE("边界4: 虚伪(新文本)——攻击距离缩近、攻击后不结算、破弃时不结算") {
+  Config cfg = make_cfg("standard", 1);
+  Engine e(cfg);
+  e.load_content(find_file("content/utsuro.lua"));
+  FirstAgent a;
+  e.set_agent(P0, &a);
+  e.set_agent(P1, &a);
+  // 测试牌：攻击【0-10 2/0】攻击后记 flag1；付与 纳1 弃置时记 flag2。
+  const char* src =
+      "local function mark(ctx, k) ctx:store_int(k, 1) end\n"
+      "return {\n"
+      " {set='t', form='O', num=1, name='TA', kind='normal', type='attack',\n"
+      "  attack={range={0,10}, damage={aura=2}},\n"
+      "  on_attack_after=function(ctx) mark(ctx, 'after') end},\n"
+      " {set='t', form='O', num=2, name='TE', kind='normal', type='enhance', nagi=1,\n"
+      "  on_discard=function(ctx) mark(ctx, 'discard') end},\n"
+      "}";
+  FILE* f = std::fopen("/tmp/fy_edge4.lua", "w");
+  std::fputs(src, f);
+  std::fclose(f);
+  e.load_content("/tmp/fy_edge4.lua");
+  // P0 展开虚伪（给足献）。
+  int xw = e.add_instance(find_def(e, "utsuro", "虚伪"), P0);
+  e.move_card(xw, Zone::Special);
+  e.ci(xw).faceUp = true;
+  e.move(AreaRef::life(P0), AreaRef::card(xw), 3, false);
+  // 4a 对手攻击：距离缩近 + 攻击后不结算。
+  {
+    int atk = e.add_instance(find_def(e, "t", "TA"), P1);
+    e.move_card(atk, Zone::Hand);
+    e.move(AreaRef::distance(), AreaRef::dust(), 2, false);  // 距 8
+    e.move(AreaRef::life(P1), AreaRef::aura(P1), 2, false);  // P1 装 5：可吃 2
+    e.st.active = P1;
+    e.play_card(P1, atk, false);
+    CHECK(e.load_int(atk, "after", 0) == 0);  // 攻击后未结算
+    // （距离缩近已由 shrink_near 生效于该攻击——用下例直接验证范围。）
+  }
+  // 4b 距离缩近（近1）：攻击范围下限 +1，距 0 → 落空。
+  {
+    int atk = e.add_instance(find_def(e, "t", "TA"), P1);
+    e.move_card(atk, Zone::Hand);
+    const int aura0 = e.ps(P0).aura;  // 此前 4a 的攻击已扣减
+    e.st.distance = 0;  // 攻击范围 0-10 缩近(近1)后应不含 0 → 落空
+    e.st.active = P1;
+    e.play_card(P1, atk, false);
+    CHECK(e.load_int(atk, "after", 0) == 0);
+    CHECK(e.ps(P0).aura == aura0);  // 未受到伤害（攻击落空）
+    CHECK(e.ps(P0).life == 7);      // = 10 - 3（搭建时移入虚伪的献；对局内无命伤）
+  }
+  // 4c 对手付与破弃时不结算。
+  {
+    int enh = e.add_instance(find_def(e, "t", "TE"), P1);
+    e.move_card(enh, Zone::Enhance);
+    e.ci(enh).crystals = 1;
+    e.consume_enhance_crystal(enh);
+    CHECK(e.ci(enh).zone == Zone::Discard);      // 牌照常离场
+    CHECK(e.load_int(enh, "discard", 0) == 0);   // 但破弃时效果未结算
+  }
+}
+
+TEST_CASE("边界5: 虚伪展开不使已展开付与脱落结晶；纳-1只作用于新展开") {
+  Config cfg = make_cfg("standard", 1);
+  Engine e(cfg);
+  e.load_content(find_file("content/utsuro.lua"));
+  e.load_content(find_file("content/saine.lua"));
+  FirstAgent a;
+  e.set_agent(P0, &a);
+  e.set_agent(P1, &a);
+  int ring = e.add_instance(find_def(e, "saine", "圈域"), P1);
+  e.move_card(ring, Zone::Enhance);
+  e.ci(ring).crystals = 2;
+  e.st.distance = 5;
+  // P0 展开虚伪。
+  int xw = e.add_instance(find_def(e, "utsuro", "虚伪"), P0);
+  e.move_card(xw, Zone::Special);
+  e.ci(xw).faceUp = true;
+  e.move(AreaRef::life(P0), AreaRef::card(xw), 3, false);
+  CHECK(e.ci(ring).crystals == 2);   // 不脱落
+  CHECK(e.st.distance == 5);         // 也没有结晶进出距
+}
+
+TEST_CASE("边界6: 破弃时已入栈的攻击不受虚伪影响（不被打消）") {
+  Config cfg = make_cfg("standard", 1);
+  Engine e(cfg);
+  e.load_content(find_file("content/utsuro.lua"));
+  // 自定义牌：付与 纳1，破弃时进行【2-3 3/2】攻击（无不可对，可对应）。
+  const char* src =
+      "return {{set='t', form='O', num=1, name='TE', kind='normal', type='enhance', nagi=1,\n"
+      "        on_discard=function(ctx)\n"
+      "          ctx:attack{range={2,3}, damage={aura=3, life=2}}\n"
+      "        end}}";
+  FILE* f = std::fopen("/tmp/fy_edge6.lua", "w");
+  std::fputs(src, f);
+  std::fclose(f);
+  e.load_content("/tmp/fy_edge6.lua");
+  struct RespAgent : Agent {
+    Decision decide(const Request& req) override {
+      if (req.kind == "response") {
+        for (size_t i = 0; i < req.options.size(); ++i)
+          if (req.options[i].label.find("虚伪") != std::string::npos)
+            return Decision{{static_cast<int>(i)}};
+        return Decision{};
+      }
+      if (req.kind == "damage") return Decision{{0}};  // 以装承伤
+      return Decision{{0}};
+    }
+  } ag;
+  e.set_agent(P0, &ag);
+  e.set_agent(P1, &ag);
+  int xw = e.add_instance(find_def(e, "utsuro", "虚伪"), P0);
+  e.move_card(xw, Zone::Special);
+  e.ci(xw).faceUp = false;
+  e.move(AreaRef::life(P0), AreaRef::flare(P0), 4, false);  // 虚伪费用 3
+  int enh = e.add_instance(find_def(e, "t", "TE"), P1);
+  e.move_card(enh, Zone::Enhance);
+  e.ci(enh).crystals = 1;
+  const int aura0 = e.ps(P0).aura;  // 3
+  e.st.active = P1;
+  e.consume_enhance_crystal(enh);
+  // 破弃时已入栈：其攻击照常结算——虚伪作为对应展开后不回溯打消。
+  CHECK(e.ci(enh).zone == Zone::Discard);
+  CHECK(e.ci(xw).faceUp);               // 虚伪被对应打出（使用后）
+  CHECK(e.card_crystal_count(xw) >= 1); // 纳3 展开（含 -1 修正前的支付）
+  CHECK(e.ps(P0).aura == aura0 - 3);    // 3/2 攻击的 3 装伤照常落地
+  CHECK_FALSE(e.st.over);
+  CHECK(crystals_total(e) == 36 + 1);   // life→flare 守恒；+1 为直置的 TE 献
+}
+
+TEST_CASE("边界7: 阴郁·埋葬只压制增益类——居合3/2、负修正保留、正修正清零") {
+  Config cfg = make_cfg("standard", 1);
+  Engine e(cfg);
+  e.load_content(find_file("content/yurina.lua"));
+  e.load_content(find_file("content/innealra.lua"));
+  FirstAgent a;
+  e.set_agent(P0, &a);
+  e.set_agent(P1, &a);
+  int burial = e.add_instance(find_def(e, "innealra", "阴郁·埋葬"), P0);
+  e.move_card(burial, Zone::Special);
+  e.ci(burial).faceUp = true;
+  e.move(AreaRef::life(P0), AreaRef::card(burial), 1, false);
+  e.move(AreaRef::aura(P0), AreaRef::flare(P0), e.ps(P0).aura, false);  // P0 装 0 → 命伤
+  // 居合：全力【2-4 4/3】距≤2 时 3/2（伤害减少类正常结算）→ 命伤 2。
+  e.st.distance = 2;
+  int ju = e.add_instance(find_def(e, "yurina", "居合"), P1);
+  e.move_card(ju, Zone::Hand);
+  e.st.active = P1;
+  const int lifeA = e.ps(P0).life;
+  e.play_card(P1, ju, false, /*zenkai=*/true);
+  CHECK(e.ps(P0).life == lifeA - 2);  // 3/2（若减益被压则 4/3→-3；若再加错增益同判）
+  CHECK(e.ps(P1).aura == 3);          // 攻击方装不受影响
+  Engine e2(cfg);
+  e2.load_content(find_file("content/yurina.lua"));
+  e2.load_content(find_file("content/innealra.lua"));
+  e2.set_agent(P0, &a);
+  e2.set_agent(P1, &a);
+  int b2 = e2.add_instance(find_def(e2, "innealra", "阴郁·埋葬"), P0);
+  e2.move_card(b2, Zone::Special);
+  e2.ci(b2).faceUp = true;
+  e2.move(AreaRef::life(P0), AreaRef::card(b2), 1, false);
+  e2.move(AreaRef::aura(P0), AreaRef::flare(P0), e2.ps(P0).aura, false);  // 装 0
+  e2.st.distance = 3;  // 射程 2-4 内且距>2：居合不减益 → 4/3（对照组）。
+  int ju2 = e2.add_instance(find_def(e2, "yurina", "居合"), P1);
+  e2.move_card(ju2, Zone::Hand);
+  e2.st.active = P1;
+  const int life0 = e2.ps(P0).life;
+  e2.play_card(P1, ju2, false, true);
+  CHECK(e2.ps(P0).life == life0 - 3);  // 4/3（无减益条件；阴郁不影响卡面值）
+}
+
+TEST_CASE("边界8: 模块化——行动弹栈插入基本动作（LIFO）、再起复用也生效") {
+  Config cfg = make_cfg("standard", 1);
+  Engine e(cfg);
+  e.load_content(find_file("content/kururu.lua"));
+  // 自定义嵌套行动：A 打 B 后留"TA后记"询问；B 打 C 后留"TB后记"询问。
+  // 弹栈即插入的期望时序：basicC → TB后记 → basicB → TA后记 → basicA。
+  const char* src =
+      "return {\n"
+      " {set='t', form='O', num=1, name='TC', kind='normal', type='action',\n"
+      "  on_play=function(ctx) ctx:store_int('done', ctx:load_int('done', 0) + 1) end},\n"
+      " {set='t', form='O', num=2, name='TB', kind='normal', type='action',\n"
+      "  on_play=function(ctx)\n"
+      "    for _, i in ipairs(ctx:hand(ctx:player())) do\n"
+      "      if ctx:card_name(i) == 'TC' then ctx:play_hand_card(i) break end\n"
+      "    end\n"
+      "    ctx:choose('TB后记', {'x'})\n"
+      "  end},\n"
+      " {set='t', form='O', num=3, name='TA', kind='normal', type='action',\n"
+      "  on_play=function(ctx)\n"
+      "    for _, i in ipairs(ctx:hand(ctx:player())) do\n"
+      "      if ctx:card_name(i) == 'TB' then ctx:play_hand_card(i) break end\n"
+      "    end\n"
+      "    ctx:choose('TA后记', {'x'})\n"
+      "  end},\n"
+      "}";
+  FILE* f = std::fopen("/tmp/fy_edge8.lua", "w");
+  std::fputs(src, f);
+  std::fclose(f);
+  e.load_content("/tmp/fy_edge8.lua");
+  struct LogAgent : Agent {
+    std::vector<std::string>* log = nullptr;
+    Decision decide(const Request& req) override {
+      if (log) log->push_back(req.prompt);
+      if (req.prompt.find("执行一次基本动作") != std::string::npos)
+        return Decision{{static_cast<int>(req.options.size()) - 1}};  // 停止
+      return Decision{{0}};
+    }
+  } ag;
+  std::vector<std::string> log;
+  ag.log = &log;
+  e.set_agent(P0, &ag);
+  FirstAgent a;
+  e.set_agent(P1, &a);
+  // 模块化展开（3 献）。
+  int mod = e.add_instance(find_def(e, "kururu", "模块化"), P0);
+  e.move_card(mod, Zone::Enhance);
+  e.ci(mod).crystals = 3;
+  e.st.distance = 5;
+  for (const char* nm : {"TA", "TB", "TC"}) {
+    int c = e.add_instance(find_def(e, "t", nm), P0);
+    e.move_card(c, Zone::Hand);
+  }
+  int ta = -1;
+  for (int i = 0; i < (int)e.st.insts.size(); ++i)
+    if (e.def_of(i).name == "TA" && e.ci(i).zone == Zone::Hand) ta = i;
+  e.st.active = P0;
+  e.play_card(P0, ta, false);
+  // 弹栈即插入（LIFO）：basicC → TB后记 → basicB → TA后记 → basicA。
+  for (int k = 0; k < 3; ++k) e.consume_enhance_crystal(mod);  // 清模块化的献（不影响断言）
+  auto idx = [&](const std::string& sub, int nth) -> int {
+    int seen = 0;
+    for (size_t k = 0; k < log.size(); ++k)
+      if (log[k].find(sub) != std::string::npos)
+        if (++seen == nth) return (int)k;
+    return -1;
+  };
+  REQUIRE(idx("执行一次基本动作", 3) > 0);  // 恰三次
+  CHECK(idx("执行一次基本动作", 1) < idx("TB后记", 1));   // C 弹栈先于 B 的收尾
+  CHECK(idx("TB后记", 1) < idx("执行一次基本动作", 2));  // B 弹栈在 B 收尾之后
+  CHECK(idx("执行一次基本动作", 2) < idx("TA后记", 1));  // B 弹栈先于 A 的收尾
+  CHECK(idx("TA后记", 1) < idx("执行一次基本动作", 3));  // A 弹栈最后
+
+  // 再起复用的切牌（行动类）同样触发：直接 reuse_special 一个已使用的行动切牌。
+  Engine e2(cfg);
+  e2.load_content(find_file("content/kururu.lua"));
+  e2.load_content("/tmp/fy_edge8.lua");
+  std::vector<std::string> log2;
+  LogAgent ag2;
+  ag2.log = &log2;
+  e2.set_agent(P0, &ag2);
+  e2.set_agent(P1, &a);
+  int mod2 = e2.add_instance(find_def(e2, "kururu", "模块化"), P0);
+  e2.move_card(mod2, Zone::Enhance);
+  e2.ci(mod2).crystals = 3;
+  // 一张"使用过"的行动切牌（TE2：行动、切札）。
+  const char* src2 =
+      "return {{set='u', form='O', num=1, name='TU', kind='special', type='action',\n"
+      "        cost=1, on_play=function(ctx) ctx:store_int('u', 1) end}}";
+  FILE* f2 = std::fopen("/tmp/fy_edge8b.lua", "w");
+  std::fputs(src2, f2);
+  std::fclose(f2);
+  e2.load_content("/tmp/fy_edge8b.lua");
+  int tu = e2.add_instance(find_def(e2, "u", "TU"), P0);
+  e2.move_card(tu, Zone::Special);
+  e2.ci(tu).faceUp = true;  // 使用后
+  e2.st.active = P0;
+  e2.reuse_special(tu);
+  bool fired = false;
+  for (const std::string& pr : log2)
+    if (pr.find("执行一次基本动作") != std::string::npos) fired = true;
+  CHECK(fired);  // 因再起/复用而再次结算的行动切牌同样触发模块化
+  CHECK(e2.load_int(tu, "u", 0) == 1);
 }

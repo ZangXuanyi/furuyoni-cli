@@ -353,12 +353,17 @@ TEST_CASE("圈域 crystals decay into distance") {
   int inst = e.add_instance(def, P0);
   e.move_card(inst, Zone::Enhance);
   e.ci(inst).crystals = 2;
-  int d0 = e.st.distance;
+  e.st.distance = 8;  // 距区留余量（裁定 2026-10-08：距区结晶硬上限 10）
   int dust0 = e.st.dust;
   e.consume_enhance_crystal(inst);
-  CHECK(e.st.distance == d0 + 1);
+  CHECK(e.st.distance == 9);
   CHECK(e.st.dust == dust0);
   CHECK(e.ci(inst).crystals == 1);
+  // 距区满（10）时：献留在牌上（能移多少移多少）。
+  e.st.distance = 10;
+  e.consume_enhance_crystal(inst);
+  CHECK(e.st.distance == 10);
+  CHECK(e.ci(inst).crystals == 1);  // 未脱落（距区满，献留牌上）
 }
 
 TEST_CASE("迷烟 negates card-effect distance changes but not basic actions") {

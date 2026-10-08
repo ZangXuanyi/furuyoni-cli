@@ -113,8 +113,11 @@ void Engine::token_adjust(const AreaRef& a, Token kind, int n) {
           ps(a.p).flare = std::max(0, ps(a.p).flare + n);
           break;
         case AreaKind::Distance:
-          if (n != 0 && st.distance != std::max(0, st.distance + n)) note_distance_changed();
-          st.distance = std::max(0, st.distance + n);
+          // 距区结晶硬上限（裁定 2026-10-08）：只约束 st.distance 原始值；
+          // 有效距离（distance()）可经修正超过上限。
+          if (n != 0 && st.distance != std::clamp(st.distance + n, 0, max_distance_crystals()))
+            note_distance_changed();
+          st.distance = std::clamp(st.distance + n, 0, max_distance_crystals());
           break;
         case AreaKind::Dust:
           // 22-Renri 罗织: 结晶离开虚也计入「移出虚」。
@@ -205,6 +208,7 @@ int Engine::move_sakura(const MoveReq& m) {
     case AreaKind::Aura:
       cap = max_aura(to.p) - ps(to.p).aura - ps(to.p).ice;  // 冰晶也占位
       break;
+    case AreaKind::Distance: cap = max_distance_crystals() - st.distance; break;
     default: break;
   }
   int moved = std::min({n, token_amount(from, Token::Sakura), cap});
@@ -288,6 +292,7 @@ int Engine::move_from_external(const MoveReq& m) {
   int cap = std::numeric_limits<int>::max();
   if (m.to.kind == AreaKind::Life) cap = st.maxLife - ps(m.to.p).life;
   if (m.to.kind == AreaKind::Aura) cap = max_aura(m.to.p) - ps(m.to.p).aura - ps(m.to.p).ice;
+  if (m.to.kind == AreaKind::Distance) cap = max_distance_crystals() - st.distance;
   const int moved = std::min(m.n, cap);
   if (moved <= 0) return 0;
   const int before = token_amount(m.to, Token::Sakura);
@@ -309,24 +314,24 @@ int Engine::move_to_external(const MoveReq& m) {
 // 规则回流，不经目的地），樱花部分再入位到目的地。
 int Engine::move_from_card(const MoveReq& m) {
   if (m.to.kind == AreaKind::Card) return 0;
+  int cap = std::numeric_limits<int>::max();
+  if (m.to.kind == AreaKind::Life) cap = st.maxLife - ps(m.to.p).life;
+  if (m.to.kind == AreaKind::Aura) cap = max_aura(m.to.p) - ps(m.to.p).aura - ps(m.to.p).ice;
+  if (m.to.kind == AreaKind::Distance) cap = max_distance_crystals() - st.distance;
   int sak = 0;
-  take_card_crystals(m.from.inst, m.n, m.takeMode, &sak);
+  take_card_crystals(m.from.inst, std::min(m.n, cap), m.takeMode, &sak);  // 放不下的留在牌上
   if (sak <= 0) return 0;
   if (m.to.kind == AreaKind::External) {
     externalAdded_ -= sak;
     if (m.notes) note_crystal_move(m.from, AreaRef::external(), sak, m.cardEffect);
     return sak;
   }
-  // 入位：容量先行（溢出部分进虚，保持守恒），事件/计数与一般移动一致。
-  int cap = std::numeric_limits<int>::max();
-  if (m.to.kind == AreaKind::Life) cap = st.maxLife - ps(m.to.p).life;
-  if (m.to.kind == AreaKind::Aura) cap = max_aura(m.to.p) - ps(m.to.p).aura - ps(m.to.p).ice;
-  const int placed = std::min(sak, cap);
+  // 入位：容量已在取牌时计好（放不下的留在牌上），这里直接全部入位。
+  const int placed = sak;
   const bool touchesDistance = m.to.kind == AreaKind::Distance;
   const int distBefore = touchesDistance ? distance() : 0;
   int a0 = st.p[P0].aura, a1 = st.p[P1].aura;
   token_adjust(m.to, Token::Sakura, placed);
-  if (placed < sak) token_adjust(AreaRef::dust(), Token::Sakura, sak - placed);
   if (st.p[P0].aura != a0) notify_aura_changed(P0);
   if (st.p[P1].aura != a1) notify_aura_changed(P1);
   if (touchesDistance && distance() != distBefore) {

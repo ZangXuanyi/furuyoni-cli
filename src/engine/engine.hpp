@@ -140,6 +140,7 @@ struct Attack {
   bool hit = false;
   bool generated = false;     // 20-Kanawe: 牌效生成的衍生攻击（不受黄格 +0/+1）
   bool wound = false;         // 24-Shisui 裂伤攻击: X/Y 变为 {X/Y} 裂伤指示物
+  bool noAfterEffects = false;  // 13-Utsuro 虚伪: 该攻击的攻击后效果不结算
 };
 
 class EffectHost;
@@ -313,6 +314,14 @@ class Engine {
   void spend_aura(Player target, int n);  // consume “视作装”结晶 first, then real aura
   int cut_cost(Player p, int defId, int inst);       // dynamic 切札 费用
   int max_aura(Player p) const;                      // 装上限（徒寄之八重樱 -> 8）
+  // 距区樱花结晶硬上限（需求裁定 2026-10-08：基座只有 10 格；可被光环效果提高，
+  // 当前无此类牌，预留钩子）。注意与「有效距离」区分：有效距离可经修正超过 10，
+  // 上限只约束距区里的结晶数（st.distance 原始值）。
+  int max_distance_crystals() const { return 10; }
+  // 牌上结晶经 decay_to 离开时可去多少（能移多少移多少，其余留在牌上）。
+  int decay_free_capacity(int inst) const;
+  // 容量感知的「取牌上结晶并按 decay_to 归置」统一入口（取代裸 take+decay）。
+  int drain_to_decay(int inst, int n, int mode);
   int effective_hand_limit(Player p) const;          // 盖伏保留上限
   bool playable_card(Player p, int inst);            // playable-in-main predicate (e.g. 决死限定)
   bool respondable_card(Player p, int inst);         // response capability (含识破/终焉)
@@ -425,8 +434,10 @@ class Engine {
   void offer_fate_rotation(Player p, const std::string& why);
   // 脆弱意志: 获得结晶的玩家的对手是否有生效中的脆弱意志（返回实例）。
   int fragile_will_host(Player gainer) const;
-  // 阴郁·埋葬: 攻击者的对手是否有「对手的攻击不受攻击修正」的生效牌。
+  // 阴郁·埋葬: 攻击者的对手是否有「对手的攻击不受（增益类）攻击修正」的生效牌。
   bool suppress_attack_mods(Player attacker) const;
+  // 虚伪: holder 的对手是否有「对手付与的破弃时不结算」的生效牌。
+  bool discard_suppressed(Player holder) const;
   // 使用切札时实际支付的费用（气→虚）与「把费用移到惑」。
   int cost_paid(int inst) const { return load_int(inst, "paid_cost", 0); }
   int cost_to_waku(Player p, int inst);
