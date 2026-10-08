@@ -25,8 +25,8 @@ echo "[match] p0 邮箱: $P0DIR   (把该目录交给座位 0 的 Agent)"
 echo "[match] p1 邮箱: $P1DIR   (把该目录交给座位 1 的 Agent)"
 
 ./build/furuyoni-cli --standard \
-    --p0-cmd "python3 scripts/ai_bridge.py --seat 0 --dir $P0DIR" \
-    --p1-cmd "python3 scripts/ai_bridge.py --seat 1 --dir $P1DIR" \
+    --p0-cmd "python3 scripts/ai_bridge.py --seat 0 --dir $P0DIR --match-dir $OUT" \
+    --p1-cmd "python3 scripts/ai_bridge.py --seat 1 --dir $P1DIR --match-dir $OUT" \
     --seed "$SEED" \
     --record "$OUT/game.json" --web "$OUT/replay.html" \
     "$@" 2>&1 | tee "$OUT/engine.log"

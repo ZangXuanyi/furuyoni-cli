@@ -194,6 +194,7 @@ def main() -> None:
     ap.add_argument("--seat", type=int, required=True)
     ap.add_argument("--dir", required=True)
     ap.add_argument("--timeout", type=float, default=0, help="软超时秒数；到点兜底选第一个合法项（0=无限等）")
+    ap.add_argument("--match-dir", default="", help="比赛输出目录（含引擎写的 result.md；桥退出时自动取回并写入座位目录）")
     args = ap.parse_args()
 
     d = args.dir
@@ -259,11 +260,27 @@ def main() -> None:
         sys.stdout.write(json.dumps({"indices": decision}) + "\n")
         sys.stdout.flush()
 
-    # stdin 关闭 = 对局结束。给 Agent 留下明确提示。
+    # stdin 关闭 = 对局结束。从比赛目录取引擎写的结果，写入座位目录。
+    result_text = ""
+    for cand in ([args.match_dir] if args.match_dir else []) + [os.path.dirname(d)]:
+        rp = os.path.join(cand, "result.md") if cand else None
+        if rp and os.path.exists(rp):
+            try:
+                result_text = open(rp, encoding="utf-8").read().strip()
+                break
+            except OSError:
+                pass
+    if result_text:
+        with open(os.path.join(d, "result.md"), "w", encoding="utf-8") as f:
+            f.write(result_text + "\n")
     with open(os.path.join(d, "inbox", "GAME-OVER.md"), "w", encoding="utf-8") as f:
-        f.write("# 对局结束\n\n引擎已关闭本座位的协议流（决出胜负/和棋或中止）。\n"
-                "结果与复盘见比赛目录（result.md / replay.html）；你的完整决策流水在 "
-                "transcript.md。\n")
+        if result_text:
+            f.write("# 对局结束\n\n" + result_text + "\n\n"
+                    "复盘见比赛目录 replay.html；你的完整决策流水在 transcript.md。\n")
+        else:
+            f.write("# 对局结束\n\n引擎已关闭本座位的协议流（决出胜负/和棋或中止）。\n"
+                    "结果与复盘见比赛目录（result.md / replay.html）；你的完整决策流水在 "
+                    "transcript.md。\n")
 
 
 if __name__ == "__main__":
