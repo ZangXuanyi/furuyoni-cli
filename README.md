@@ -4,6 +4,8 @@
 用于评测外部智能体的打牌决策。引擎本身不含打牌 AI；全部 26 柱女神 + 最初的决斗
 已实现（新幕 S10-2 全扩）。
 
+**本实现（包括牌效、牌名等）可能和官方略有出入！尚需要大量的测试。**
+
 ## 构建
 
 依赖：C++20、CMake ≥ 3.20、pkg-config 的 `lua5.4`、`nlohmann_json`
@@ -27,6 +29,11 @@ ctest --test-dir build --output-on-failure
     --p0-cmd "python3 examples/random_agent.py" \
     --p1-cmd "python3 examples/first_agent.py"
 
+# 接入外部智能体（LLM Agent，有桥接）
+python ./scripts/match.py practice1 42 \
+    matches/practice/p0 matches/practice/p1 \ 
+    --preset gachi-full # 完全战全扩。不加preset字段是起源战全扩
+
 # 生成回放 WebUI（自包含 HTML，浏览器打开逐步查看）
 ./build/furuyoni-cli --standard --random --seed 42 --web /tmp/replay.html
 ```
@@ -44,9 +51,7 @@ ctest --test-dir build --output-on-failure
 | [`docs/adding-goddess.md`](docs/adding-goddess.md) | 如何新增女神（Lua 卡面 + 何时写 C++ 机制） |
 | [`docs/architecture.md`](docs/architecture.md) | 代码架构与关键设计（Token 系统/结算管线/机制模块） |
 | [`docs/testing.md`](docs/testing.md) | 测试体系：单元/模糊/ASan/语料对照方法 |
-| [`docs/rulings.md`](docs/rulings.md) | **规则语义裁定的唯一权威**（与 `rules/` 卡面冲突时以裁定为准） |
 | [`docs/content-modules.md`](docs/content-modules.md) | 内容模块/包/预设系统 |
-| [`docs/refactor-log.md`](docs/refactor-log.md) | 2026-10 大重构日志与破坏性变更清单 |
 
 ## 第三方
 

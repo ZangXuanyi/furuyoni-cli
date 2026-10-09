@@ -16,8 +16,10 @@
 enabled/越界），不合法会要求重写——协议层面永不判负；决策质量由 LLM 自负。
 """
 import argparse
+import atexit
 import json
 import os
+import signal
 import sys
 import time
 
@@ -124,7 +126,7 @@ def render_state(state: dict, seat: int) -> str:
 
 def render_attack(data: dict) -> str:
     """对应窗口携带的被对应攻击摘要（Request.data.attack）。"""
-    atk = (data or {}).get("attack") if isinstance(data, dict) else None
+    atk = data.get("attack") if isinstance(data, dict) else None
     if not atk:
         return ""
     kws = "、".join(atk.get("keywords", [])) or "无"
@@ -140,7 +142,7 @@ def render_request(seq: int, req: dict, seat: int) -> str:
     lines.append(f"- 回合/提示: **{req.get('prompt','')}**（kind={req.get('kind','')}）")
     lines.append(f"- 选择数量: **{req.get('minSelect',1)} ~ {req.get('maxSelect',1)}** 个")
     lines.append("")
-    lines.append(render_attack(req.get("data")))
+    lines.append(render_attack(req.get("data", {})))
     lines.append("## 局面")
     lines.append(render_state(req.get("state", {}), seat))
     lines.append("")
@@ -189,6 +191,51 @@ def validate(req: dict, indices) -> str:
     return None
 
 
+_cleanup_dir = None  # 桥的座位目录（atexit / 信号处理器用）
+
+
+def _find_result_text(d: str) -> str:
+    """从比赛目录（--match-dir 或座位目录的父目录）取引擎写的 result.md。"""
+    cands = []
+    env_md = os.environ.get("FY_MATCH_DIR", "")
+    if env_md:
+        cands.append(env_md)
+    cands.append(os.path.dirname(os.path.abspath(d)))
+    for cand in cands:
+        rp = os.path.join(cand, "result.md")
+        if os.path.exists(rp):
+            try:
+                return open(rp, encoding="utf-8").read().strip()
+            except OSError:
+                pass
+    return ""
+
+
+def _write_game_over(d: str) -> None:
+    """写 result.md + GAME-OVER.md（幂等；信号处理器与 EOF 路径共用）。"""
+    if d is None:
+        return
+    text = _find_result_text(d)
+    try:
+        if text:
+            with open(os.path.join(d, "result.md"), "w", encoding="utf-8") as f:
+                f.write(text + "\n")
+        with open(os.path.join(d, "inbox", "GAME-OVER.md"), "w", encoding="utf-8") as f:
+            if text:
+                f.write("# 对局结束\n\n" + text + "\n\n"
+                        "复盘见比赛目录 replay.html；完整决策流水在 transcript.md。\n")
+            else:
+                f.write("# 对局结束\n\n引擎已关闭本座位的协议流。\n"
+                        "结果见比赛目录 result.md / replay.html。\n")
+    except OSError:
+        pass
+
+
+def _on_signal(signum, frame):
+    _write_game_over(_cleanup_dir)
+    sys.exit(0)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--seat", type=int, required=True)
@@ -197,7 +244,12 @@ def main() -> None:
     ap.add_argument("--match-dir", default="", help="比赛输出目录（含引擎写的 result.md；桥退出时自动取回并写入座位目录）")
     args = ap.parse_args()
 
-    d = args.dir
+    d = os.path.abspath(args.dir)
+    global _cleanup_dir
+    _cleanup_dir = d
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, _on_signal)
+    atexit.register(lambda: _write_game_over(d))
     os.makedirs(os.path.join(d, "inbox"), exist_ok=True)
     os.makedirs(os.path.join(d, "answer"), exist_ok=True)
     trans_path = os.path.join(d, "transcript.md")
@@ -260,27 +312,8 @@ def main() -> None:
         sys.stdout.write(json.dumps({"indices": decision}) + "\n")
         sys.stdout.flush()
 
-    # stdin 关闭 = 对局结束。从比赛目录取引擎写的结果，写入座位目录。
-    result_text = ""
-    for cand in ([args.match_dir] if args.match_dir else []) + [os.path.dirname(d)]:
-        rp = os.path.join(cand, "result.md") if cand else None
-        if rp and os.path.exists(rp):
-            try:
-                result_text = open(rp, encoding="utf-8").read().strip()
-                break
-            except OSError:
-                pass
-    if result_text:
-        with open(os.path.join(d, "result.md"), "w", encoding="utf-8") as f:
-            f.write(result_text + "\n")
-    with open(os.path.join(d, "inbox", "GAME-OVER.md"), "w", encoding="utf-8") as f:
-        if result_text:
-            f.write("# 对局结束\n\n" + result_text + "\n\n"
-                    "复盘见比赛目录 replay.html；你的完整决策流水在 transcript.md。\n")
-        else:
-            f.write("# 对局结束\n\n引擎已关闭本座位的协议流（决出胜负/和棋或中止）。\n"
-                    "结果与复盘见比赛目录（result.md / replay.html）；你的完整决策流水在 "
-                    "transcript.md。\n")
+    # stdin 关闭 = 对局结束。
+    _write_game_over(d)
 
 
 if __name__ == "__main__":

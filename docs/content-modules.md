@@ -106,7 +106,7 @@ ruleset: preset=kigen-full variants=off packs=tatsujin+official goddesses=12 mod
   文本写“以未使用状态获得 X 到切牌区”的（`双掌生花`/`新幕来临`/`夙愿`/`熠熠见繁樱`…）直接用。
 * 普通（非切札）EX 若被 `gain_extra` 获得，必须由卡面把它移出切牌区（抽牌堆底/弃牌堆/牌库），
   否则它既不能当切札打出、也不在正常区域。`绽放` 的 `bloom()` 已按文本强制二选一。
-* 引擎只在 `Zone::Special` 里把 `kind == "special"` 的牌当切札提供／当对应（普通 EX 不会被误当切札）。
+* 引擎只在 `Zone::Special` 里把 `kind == "special"` 的牌当切札提供／当对应。
 
 ## 6. 动态加载 / 卸载
 
